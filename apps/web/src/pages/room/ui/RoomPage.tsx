@@ -47,11 +47,71 @@ export function RoomPage() {
     retry: false,
   });
   const mutation = useMutation({
-    mutationFn: ({ endpoint, method = 'POST', body }: Command) =>
-      request<RoomSnapshot | { left: true }>(
-        `/rooms/${encodeURIComponent(id)}${endpoint}`,
-        { method, body },
-      ),
+    mutationFn: async ({ endpoint, method = 'POST', body }: Command) => {
+      const roomPath = `/rooms/${encodeURIComponent(id)}`;
+      const baseline = queryClient.getQueryData<RoomSnapshot>(key);
+      const payload = body && typeof body === 'object' ? body : null;
+      const ownAction =
+        method === 'PUT' &&
+        ['/preferences', '/vote', '/ready'].includes(endpoint);
+      const baselineMember = baseline?.members.find(
+        (member) => member.id === baseline.viewerMemberId,
+      );
+      const knownVersion =
+        baseline &&
+        payload &&
+        'version' in payload &&
+        payload.version === baseline.version;
+      try {
+        return await request<RoomSnapshot | { left: true }>(
+          `${roomPath}${endpoint}`,
+          { method, body },
+        );
+      } catch (error) {
+        if (
+          !(error instanceof ApiError) ||
+          error.status !== 409 ||
+          !ownAction ||
+          !knownVersion ||
+          !baselineMember
+        )
+          throw error;
+
+        const fresh = await request<RoomSnapshot>(roomPath);
+        queryClient.setQueryData<RoomSnapshot>(key, (current) =>
+          current && current.version > fresh.version ? current : fresh,
+        );
+        const freshMember = fresh.members.find(
+          (member) => member.id === fresh.viewerMemberId,
+        );
+        const sameContext =
+          fresh.id === baseline.id &&
+          fresh.viewerMemberId === baseline.viewerMemberId &&
+          fresh.round === baseline.round &&
+          fresh.status === baseline.status;
+        const correctRound =
+          endpoint === '/preferences' ||
+          ('round' in payload && payload.round === baseline.round);
+        const sameOwnField =
+          freshMember &&
+          (endpoint === '/preferences'
+            ? baseline.status === 'collecting' &&
+              JSON.stringify(freshMember.preferences) ===
+                JSON.stringify(baselineMember.preferences)
+            : endpoint === '/vote'
+              ? baseline.status === 'voting' &&
+                freshMember.voteGameId === baselineMember.voteGameId
+              : baseline.status === 'confirmed' &&
+                freshMember.ready === baselineMember.ready);
+        if (!sameContext || !correctRound || !sameOwnField) throw error;
+
+        // Rebase only this member's unchanged field, once. A second conflict is surfaced.
+        return request<RoomSnapshot>(`${roomPath}${endpoint}`, {
+          method,
+          body: { ...payload, version: fresh.version },
+        });
+      }
+    },
     onSuccess: (result) => {
       if ('left' in result) {
         queryClient.removeQueries({ queryKey: key });
