@@ -1,9 +1,9 @@
-import { useApiHealth } from '../../../shared/api';
-import adventureArt from '../../../shared/assets/dungeon/adventure.webp';
-import hallArt from '../../../shared/assets/dungeon/hall.webp';
-import partyArt from '../../../shared/assets/dungeon/party.webp';
-import goldFrame from '../../../shared/assets/dungeon/gold-frame.webp';
-import stoneFrame from '../../../shared/assets/dungeon/stone-frame.webp';
+import { useApiHealth } from '@shares/api';
+import adventureArt from '@shares/assets/dungeon/adventure.webp';
+import hallArt from '@shares/assets/dungeon/hall.webp';
+import partyArt from '@shares/assets/dungeon/party.webp';
+import goldFrame from '@shares/assets/dungeon/gold-frame.webp';
+import stoneFrame from '@shares/assets/dungeon/stone-frame.webp';
 import type { CSSProperties } from 'react';
 
 const goldBorder =
@@ -130,16 +130,16 @@ export function HomePage() {
               className="grid gap-4 max-[850px]:grid-cols-2 max-[540px]:grid-cols-1"
               aria-label="Начать знакомство"
             >
-              <MenuLink href="#preview" primary>
-                Посмотреть пример
+              <MenuLink href="/create" primary>
+                Создать комнату
               </MenuLink>
-              <MenuLink href="#how">Как это работает</MenuLink>
+              <MenuLink href="#preview">Посмотреть пример</MenuLink>
             </nav>
             <p className="mt-[34px] flex items-center gap-4 text-[21px] leading-[1.25] text-[#bfc3cb] max-[850px]:mt-[25px] max-[850px]:[&_br]:hidden max-[540px]:text-[19px]">
               <PixelIcon name="info" />
               <span>
-                Демонстрация. <br />
-                Комнаты в разработке.
+                Справа — пример. <br />
+                Соберите свой отряд по ссылке.
               </span>
             </p>
           </div>
