@@ -1,5 +1,26 @@
 import { expect, test, type Page } from '@playwright/test';
 
+async function captureState(page: Page, state: string, fullPage = true) {
+  const original = page.viewportSize();
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      window.scrollTo(0, 0);
+    });
+    await page.screenshot({
+      path: `test-results/mvp-${state}-${width}.png`,
+      fullPage,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+  }
+  if (original) await page.setViewportSize(original);
+}
+
 async function answer(page: Page, wanted: string) {
   const form = page.getByRole('form', { name: 'Ваши пожелания' });
   await expect(form).toBeVisible();
@@ -33,6 +54,7 @@ test('two guests create, join, choose, vote and confirm a real room', async ({
   await page
     .getByLabel('Максимум участников', { exact: true })
     .selectOption('2');
+  await captureState(page, 'create');
   await page
     .getByRole('button', { name: 'Создать комнату', exact: true })
     .click();
@@ -44,6 +66,7 @@ test('two guests create, join, choose, vote and confirm a real room', async ({
   try {
     await guest.goto(invite);
     await guest.getByLabel('Ваше имя', { exact: true }).fill('Друг');
+    await captureState(guest, 'join');
     await guest
       .getByRole('button', { name: 'Войти в комнату', exact: true })
       .click();
@@ -51,6 +74,7 @@ test('two guests create, join, choose, vote and confirm a real room', async ({
     await expect(
       page.getByRole('list', { name: 'Участники комнаты' }),
     ).toContainText('Друг');
+    await captureState(page, 'collecting', false);
     await answer(page, 'Deep Rock Galactic');
     await answer(guest, 'Deep Rock Galactic');
     const start = page.getByRole('button', {
@@ -87,6 +111,7 @@ test('two guests create, join, choose, vote and confirm a real room', async ({
       exact: true,
     });
     await expect(finish).toBeEnabled();
+    await captureState(page, 'voting');
     await finish.click();
     await page
       .getByRole('button', { name: 'Готов играть', exact: true })
