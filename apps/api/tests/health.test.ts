@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 
 it('serves the API health endpoint', async () => {
-  const app = buildApp();
+  const app = buildApp({ dataDir: 'memory://', logger: false });
   try {
     const response = await app.inject({ method: 'GET', url: '/api/health' });
     expect(response.statusCode).toBe(200);
