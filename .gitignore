@@ -8,3 +8,30 @@ coverage/
 .DS_Store
 playwright-report/
 test-results/
+
+# Local agent instructions and working notes
+AGENTS.md
+/docs/
+.codex/
+
+# Editor and OS files
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# Temporary files and tool caches
+tmp/
+temp/
+.cache/
+.vite/
+*.tmp
+*.temp
+*.tsbuildinfo
+/artifacts/
+/output/
+/blob-report/
+/playwright/.cache/

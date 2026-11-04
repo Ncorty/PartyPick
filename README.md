@@ -37,16 +37,6 @@ npm run test:e2e
 запуск собранного API: `npm run start -w @partypick/api`.
 Сервер API пока не раздаёт собранный интерфейс. Production-размещение — отдельный этап.
 
-## Документация
-
-- [Стек, границы и модель данных](docs/architecture.md)
-- [Этапы разработки и критерии готовности](docs/roadmap.md)
-- [Работа с Git](docs/git-workflow.md)
-- [Правила FSD](docs/frontend-fsd.md)
-- [Инструменты из существующих проектов](docs/existing-tools.md)
-- [Визуальное направление](docs/visual-direction.md)
-- [Известные ограничения](docs/known-limitations.md)
-
 ## Источники технических решений
 
 - https://vite.dev/guide/
