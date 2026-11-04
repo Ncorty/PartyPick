@@ -8,6 +8,7 @@ coverage/
 .DS_Store
 playwright-report/
 test-results/
+.data/
 
 # Local agent instructions and working notes
 AGENTS.md
