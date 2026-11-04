@@ -13,6 +13,12 @@ test-results/
 AGENTS.md
 /docs/
 .codex/
+.impeccable/
+.playwright-cli/
+*.webp.json
+provenance.json
+PRODUCT.md
+DESIGN.md
 
 # Editor and OS files
 .idea/

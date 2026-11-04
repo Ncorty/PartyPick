@@ -8,6 +8,21 @@ test('desktop and mobile preserve the preview and have no horizontal overflow', 
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await Promise.all([...document.images].map((image) => image.decode()));
+      const backgroundElements = document.querySelectorAll<HTMLElement>(
+        '[style*="background-image"]',
+      );
+      await Promise.all(
+        [...backgroundElements].map(async (element) => {
+          const url = getComputedStyle(element).backgroundImage.slice(5, -2);
+          const image = new Image();
+          image.src = url;
+          await image.decode();
+        }),
+      );
+    });
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
     await page.getByRole('link', { name: 'Посмотреть пример' }).click();
     await expect(page).toHaveURL(/#preview$/);
@@ -17,6 +32,22 @@ test('desktop and mobile preserve the preview and have no horizontal overflow', 
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    const names = page
+      .getByRole('list', { name: 'Пример участников' })
+      .locator('li > span');
+    for (const name of await names.all()) {
+      expect(
+        await name.evaluate(
+          (element) => element.scrollWidth <= element.clientWidth,
+        ),
+      ).toBe(true);
+    }
+    const gameTitle = page.getByRole('heading', { name: 'Вечер приключений' });
+    expect(
+      await gameTitle.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
       ),
     ).toBe(true);
     await page.screenshot({
