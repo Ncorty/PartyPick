@@ -18,7 +18,7 @@ export function describeReason(
     case 'players_fit':
       return 'Подходит по числу игроков';
     case 'time_fit':
-      return 'Укладывается в доступное время';
+      return 'Ориентир сессии подходит по времени';
     case 'mode_fit':
       return 'Режим подходит компании';
     case 'no_veto':

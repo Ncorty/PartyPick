@@ -74,7 +74,7 @@ test('two guests create, join, choose, vote and confirm a real room', async ({
     await expect(
       page.getByRole('list', { name: 'Участники комнаты' }),
     ).toContainText('Друг');
-    await captureState(page, 'collecting', false);
+    await captureState(page, 'collecting');
     await answer(page, 'Deep Rock Galactic');
     await answer(guest, 'Deep Rock Galactic');
     const start = page.getByRole('button', {

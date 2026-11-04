@@ -30,12 +30,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="flex min-h-20 items-center justify-between gap-4 border-b-2 border-[#a68953] bg-[#101722ed] px-5 py-4 sm:px-10">
         <Link
           to="/"
-          className="font-['Not_A_Bug','Pixelify_Sans',sans-serif] text-xl tracking-wide no-underline sm:text-3xl"
+          className="shrink-0 whitespace-nowrap font-['Not_A_Bug','Pixelify_Sans',sans-serif] text-[18px] tracking-wide no-underline sm:text-3xl"
           aria-label="PartyPick — главная"
         >
           PARTY PICK
         </Link>
-        <Link to="/create" className="py-2 text-lg underline sm:text-xl">
+        <Link
+          to="/create"
+          className="max-w-[110px] py-2 text-right text-lg leading-tight underline sm:max-w-none sm:text-xl"
+        >
           Создать комнату
         </Link>
       </header>

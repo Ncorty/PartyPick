@@ -131,6 +131,9 @@ export function PreferencesEditor({
                 {game.minPlayers}–{game.maxPlayers} игроков · около{' '}
                 {game.suggestedMinutes} мин.
               </p>
+              <p className="mt-2 text-lg leading-snug text-[#bfc3cb]">
+                {game.description}
+              </p>
               <div className="my-3 flex flex-wrap gap-x-6 gap-y-2">
                 <label className="flex min-h-11 cursor-pointer items-center gap-3 text-xl">
                   <input

@@ -216,6 +216,24 @@ export function RoomPage() {
           }).format(new Date(room.expiresAt))}
         </p>
       </div>
+      {host && inviteUrl && (
+        <div className="mb-6 lg:hidden">
+          <Button
+            type="button"
+            className="w-full"
+            onClick={() => void copyInvite()}
+          >
+            Пригласить друзей
+          </Button>
+          {copyMessage && <Notice>{copyMessage}</Notice>}
+          <a
+            href="#room-invite"
+            className="mt-2 inline-block py-2 text-lg underline"
+          >
+            Показать ссылку приглашения
+          </a>
+        </div>
+      )}
       {mutation.isError && (
         <Notice error>{errorMessage(mutation.error)}</Notice>
       )}
@@ -226,7 +244,7 @@ export function RoomPage() {
         </Notice>
       )}
       <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
-        <div className="grid min-w-0 gap-7">
+        <div className="order-2 grid min-w-0 gap-7 lg:order-1">
           <Panel title="Ваш отряд">
             <ul className="grid gap-3" aria-label="Участники комнаты">
               {room.members.map((member, index) => (
@@ -267,7 +285,10 @@ export function RoomPage() {
               ))}
             </ul>
             {host && inviteUrl && (
-              <div className="mt-6 border-t-2 border-[#536477] pt-5">
+              <div
+                id="room-invite"
+                className="mt-6 border-t-2 border-[#536477] pt-5"
+              >
                 <label htmlFor="invite-link" className="mb-2 block text-xl">
                   Приглашение для друзей
                 </label>
@@ -289,7 +310,11 @@ export function RoomPage() {
                   Комната закрытая: ссылка даёт возможность вступить. Не
                   публикуйте её открыто.
                 </p>
-                {copyMessage && <Notice>{copyMessage}</Notice>}
+                {copyMessage && (
+                  <div className="hidden lg:block">
+                    <Notice>{copyMessage}</Notice>
+                  </div>
+                )}
               </div>
             )}
             {!host && (
@@ -309,19 +334,24 @@ export function RoomPage() {
               </Button>
             )}
           </Panel>
-          <Panel title="Ход вечера">
-            <ol className="grid gap-3 text-xl leading-snug">
-              <li>Сохраните время и пожелания по всем играм.</li>
-              <li>Когда все ответят, ведущий откроет голосование.</li>
-              <li>Выберите игру и подтвердите готовность.</li>
-            </ol>
-            <p className="mt-5 text-lg text-[#bfc3cb]">
-              Новое вступление, выход участника или изменение условий начинает
-              новый раунд. Старые голоса сбрасываются.
-            </p>
+          <Panel>
+            <details>
+              <summary className="cursor-pointer py-2 text-2xl text-[#dfb768]">
+                Ход вечера
+              </summary>
+              <ol className="mt-5 grid gap-3 text-xl leading-snug">
+                <li>Сохраните время и пожелания по всем играм.</li>
+                <li>Когда все ответят, ведущий откроет голосование.</li>
+                <li>Выберите игру и подтвердите готовность.</li>
+              </ol>
+              <p className="mt-5 text-lg text-[#bfc3cb]">
+                Новое вступление, выход участника или изменение условий начинает
+                новый раунд. Старые голоса сбрасываются.
+              </p>
+            </details>
           </Panel>
         </div>
-        <div className="grid min-w-0 gap-7">
+        <div className="order-1 grid min-w-0 gap-7 lg:order-2">
           {room.status === 'collecting' && (
             <Panel title="Ваши пожелания">
               {catalogQuery.isPending ? (
