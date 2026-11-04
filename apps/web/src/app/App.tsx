@@ -1,8 +1,8 @@
-import { HomePage } from '../pages/home';
-import { CreateRoomPage } from '../pages/create';
-import { JoinRoomPage } from '../pages/join';
-import { RoomPage } from '../pages/room';
-import { NotFoundPage } from '../pages/not-found';
+import { HomePage } from '@pages/home';
+import { CreateRoomPage } from '@pages/create';
+import { JoinRoomPage } from '@pages/join';
+import { RoomPage } from '@pages/room';
+import { NotFoundPage } from '@pages/not-found';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './styles.css';

@@ -1,8 +1,8 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import hallArt from '../assets/dungeon/hall.webp';
-import goldFrame from '../assets/dungeon/gold-frame.webp';
-import stoneFrame from '../assets/dungeon/stone-frame.webp';
+import hallArt from '@shares/assets/dungeon/hall.webp';
+import goldFrame from '@shares/assets/dungeon/gold-frame.webp';
+import stoneFrame from '@shares/assets/dungeon/stone-frame.webp';
 
 export const inputClass =
   'w-full min-w-0 border-2 border-[#788594] bg-[#101722] px-3 py-2 text-xl text-[#f1e5c6] placeholder:text-[#b4b8bf] disabled:opacity-60';

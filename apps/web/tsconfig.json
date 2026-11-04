@@ -5,6 +5,12 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "paths": {
+      "@/*": ["./src/*"],
+      "@app/*": ["./src/app/*"],
+      "@pages/*": ["./src/pages/*"],
+      "@widgets/*": ["./src/widgets/*"],
+      "@features/*": ["./src/features/*"],
+      "@entities/*": ["./src/entities/*"],
       "@shares/*": ["./src/shared/*"]
     },
     "jsx": "react-jsx",

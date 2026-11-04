@@ -1,14 +1,8 @@
 import { defineConfig } from 'vitest/config';
-import { fileURLToPath } from 'node:url';
+import { frontendAliases } from './config/frontend-aliases';
 
 export default defineConfig({
-  resolve: {
-    alias: {
-      '@shares': fileURLToPath(
-        new URL('./apps/web/src/shared', import.meta.url),
-      ),
-    },
-  },
+  resolve: { alias: frontendAliases },
   test: {
     include: [
       'apps/**/*.test.ts',
