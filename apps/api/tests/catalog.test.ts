@@ -1,0 +1,127 @@
+import { describe, expect, it } from 'vitest';
+import { catalog } from '@partypick/contracts';
+import { openDatabase } from '../src/db.js';
+import {
+  CATALOG_SEED_VERSION,
+  readCatalog,
+  seedCatalog,
+} from '../src/catalog.js';
+
+describe('database-backed catalog', () => {
+  it('seeds idempotently, updates older definitions and preserves current edits', async () => {
+    const database = await openDatabase('memory://');
+    try {
+      await seedCatalog(database);
+      expect(
+        (await readCatalog(database)).map((game) => game.id).sort(),
+      ).toEqual(catalog.map((game) => game.id).sort());
+      const first = catalog[0]!;
+      const edited = { ...first, name: 'Локальная редакция' };
+      await database.query(
+        'UPDATE game_catalog SET data = $2::jsonb WHERE id = $1',
+        [first.id, JSON.stringify(edited)],
+      );
+      await seedCatalog(database);
+      expect(
+        (await readCatalog(database)).find((game) => game.id === first.id)
+          ?.name,
+      ).toBe(edited.name);
+      await database.query(
+        'UPDATE game_catalog SET seed_version = $2 WHERE id = $1',
+        [first.id, CATALOG_SEED_VERSION - 1],
+      );
+      await seedCatalog(database);
+      expect(
+        (await readCatalog(database)).find((game) => game.id === first.id),
+      ).toEqual(first);
+      const rows = await database.query<{ count: number }>(
+        'SELECT COUNT(*)::int AS count FROM game_catalog',
+      );
+      expect(rows.rows[0]?.count).toBe(catalog.length);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it('freezes legacy rooms to six games without rewriting modern room catalogs', async () => {
+    const database = await openDatabase('memory://');
+    try {
+      await database.query(
+        'INSERT INTO rooms (id, invite_hash, state) VALUES ($1, $2, $3::jsonb)',
+        ['legacy', 'legacy-invite', JSON.stringify({ id: 'legacy', round: 3 })],
+      );
+      const frozen = [{ ...catalog[0]!, name: 'Зафиксированная версия' }];
+      await database.query(
+        'INSERT INTO rooms (id, invite_hash, state) VALUES ($1, $2, $3::jsonb)',
+        [
+          'modern',
+          'modern-invite',
+          JSON.stringify({ id: 'modern', catalog: frozen }),
+        ],
+      );
+      await seedCatalog(database);
+      await seedCatalog(database);
+      const legacy = await database.query<{
+        state: { round: number; catalog: typeof catalog };
+      }>('SELECT state FROM rooms WHERE id = $1', ['legacy']);
+      expect(legacy.rows[0]?.state.round).toBe(3);
+      expect(
+        legacy.rows[0]?.state.catalog.map((game) => game.id).sort(),
+      ).toEqual([
+        'deep-rock',
+        'dont-starve',
+        'overcooked-2',
+        'pummel-party',
+        'unrailed',
+        'valheim',
+      ]);
+      const modern = await database.query<{
+        state: { catalog: typeof catalog };
+      }>('SELECT state FROM rooms WHERE id = $1', ['modern']);
+      expect(modern.rows[0]?.state.catalog).toEqual(frozen);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it.each(['voting', 'confirmed'])(
+    'restarts a legacy %s round once while preserving members and preferences',
+    async (status) => {
+      const database = await openDatabase('memory://');
+      try {
+        const preferences = { mode: 'any', availableMinutes: 60, games: [] };
+        const state = {
+          id: 'legacy',
+          status,
+          round: 4,
+          version: 9,
+          winnerGameId: 'deep-rock',
+          members: [
+            { id: 'host', preferences, voteGameId: 'deep-rock', ready: true },
+          ],
+        };
+        await database.query(
+          'INSERT INTO rooms (id, invite_hash, state) VALUES ($1, $2, $3::jsonb)',
+          ['legacy', 'legacy-invite', JSON.stringify(state)],
+        );
+        await seedCatalog(database);
+        await seedCatalog(database);
+        const result = await database.query<{
+          state: typeof state & { catalog: typeof catalog };
+        }>('SELECT state FROM rooms WHERE id = $1', ['legacy']);
+        expect(result.rows[0]?.state).toMatchObject({
+          status: 'collecting',
+          round: 5,
+          version: 10,
+          winnerGameId: null,
+          members: [
+            { id: 'host', preferences, voteGameId: null, ready: false },
+          ],
+        });
+        expect(result.rows[0]?.state.catalog).toHaveLength(6);
+      } finally {
+        await database.close();
+      }
+    },
+  );
+});

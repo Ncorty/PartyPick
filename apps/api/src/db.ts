@@ -77,6 +77,11 @@ export async function openDatabase(
     invite_hash TEXT NOT NULL UNIQUE,
     state JSONB NOT NULL
   )`);
+    await database.query(`CREATE TABLE IF NOT EXISTS game_catalog (
+    id TEXT PRIMARY KEY,
+    data JSONB NOT NULL,
+    seed_version INTEGER NOT NULL
+  )`);
     return database;
   } catch (error) {
     await database.close();

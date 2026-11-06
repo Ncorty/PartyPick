@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import type { HTTPMethods } from 'fastify';
 import {
   catalog,
+  type Game,
   type Preferences,
   type RoomSnapshot,
 } from '@partypick/contracts';
 import { buildApp } from '../src/app.js';
+import { openDatabase } from '../src/db.js';
 
 const ORIGIN = 'http://127.0.0.1:5173';
 type App = ReturnType<typeof buildApp>;
@@ -169,6 +171,110 @@ describe('room API and authorization', () => {
       },
     );
     expect(invalidPrefs.statusCode).toBe(400);
+  });
+
+  it('serves the persisted catalog and rejects unknown game choices without changing a room', async () => {
+    const host = new Client(app);
+    const response = await host.send('GET', '/api/catalog');
+    expect(response.statusCode).toBe(200);
+    const games = response.json<Game[]>();
+    expect(games.map((game) => game.id).sort()).toEqual(
+      catalog.map((game) => game.id).sort(),
+    );
+    const room = await create(host);
+    expect(room.catalog).toEqual(games);
+    const unknown = await host.send(
+      'PUT',
+      `/api/rooms/${room.id}/preferences`,
+      {
+        version: room.version,
+        preferences: {
+          ...preferences(),
+          games: [
+            {
+              gameId: 'unknown-game',
+              owned: true,
+              installed: true,
+              taste: 'want',
+            },
+          ],
+        },
+      },
+    );
+    expect(unknown.statusCode).toBe(400);
+    expect(unknown.json().error.code).toBe('VALIDATION_ERROR');
+    expect((await get(host, room.id)).version).toBe(room.version);
+  });
+
+  it('matches competitive squads using actual party profiles and unanimous random-fill consent', async () => {
+    const host = new Client(app),
+      guest = new Client(app);
+    let room = await create(host);
+    await joinRoom(guest, room);
+    const gameIds = ['cs2', 'valorant', 'dota2', 'arc-raiders', 'overwatch'];
+    const prefs: Preferences = {
+      availableMinutes: 120,
+      mode: 'any',
+      allowRandoms: true,
+      games: gameIds.map((gameId) => ({
+        gameId,
+        owned: true,
+        installed: true,
+        taste: 'want',
+      })),
+    };
+    for (const client of [host, guest]) {
+      room = await get(client, room.id);
+      const answered = await client.send(
+        'PUT',
+        `/api/rooms/${room.id}/preferences`,
+        {
+          version: room.version,
+          preferences: prefs,
+        },
+      );
+      expect(answered.statusCode).toBe(200);
+    }
+    room = await get(host, room.id);
+    expect(room.matching.eligible.map((match) => match.gameId).sort()).toEqual(
+      gameIds.sort(),
+    );
+    const cs = room.matching.eligible.find((match) => match.gameId === 'cs2')!;
+    expect(cs.profileId).toBe('wingman');
+    expect(cs.randomSlots).toBe(0);
+    for (const gameId of ['valorant', 'dota2', 'overwatch']) {
+      expect(
+        room.matching.eligible.find((match) => match.gameId === gameId)
+          ?.randomSlots,
+      ).toBe(3);
+    }
+    const refused = await guest.send(
+      'PUT',
+      `/api/rooms/${room.id}/preferences`,
+      {
+        version: room.version,
+        preferences: { ...prefs, allowRandoms: false },
+      },
+    );
+    expect(refused.statusCode).toBe(200);
+    room = refused.json<RoomSnapshot>();
+    expect(room.matching.eligible.map((match) => match.gameId).sort()).toEqual([
+      'arc-raiders',
+      'cs2',
+    ]);
+    for (const gameId of ['valorant', 'dota2', 'overwatch']) {
+      expect(
+        room.matching.excluded
+          .find((match) => match.gameId === gameId)
+          ?.reasons.map((reason) => reason.code),
+      ).toContain('randoms_required');
+    }
+    const coop = await guest.send('PUT', `/api/rooms/${room.id}/preferences`, {
+      version: room.version,
+      preferences: { ...prefs, mode: 'coop' },
+    });
+    expect(coop.statusCode).toBe(200);
+    expect(coop.json<RoomSnapshot>().matching.eligible).toEqual([]);
   });
 
   it('serializes concurrent joins and versioned writes without exceeding capacity', async () => {
@@ -403,10 +509,31 @@ it('persists rooms and guest sessions across database restart', async () => {
     const room = await create(host);
     const cookie = host.cookie;
     await app.close();
+    const database = await openDatabase(directory);
+    try {
+      const edited = {
+        ...room.catalog[0]!,
+        name: 'Обновлённая запись каталога',
+      };
+      await database.query(
+        'UPDATE game_catalog SET data = $2::jsonb WHERE id = $1',
+        [edited.id, JSON.stringify(edited)],
+      );
+    } finally {
+      await database.close();
+    }
     app = buildApp({ dataDir: directory, logger: false });
     const returning = new Client(app);
     returning.cookie = cookie;
-    expect((await get(returning, room.id)).title).toBe(room.title);
+    const restored = await get(returning, room.id);
+    expect(restored.title).toBe(room.title);
+    expect(restored.catalog).toEqual(room.catalog);
+    const currentCatalog = (await returning.send('GET', '/api/catalog')).json<
+      Game[]
+    >();
+    expect(
+      currentCatalog.find((game) => game.id === room.catalog[0]!.id)?.name,
+    ).toBe('Обновлённая запись каталога');
   } finally {
     await app.close();
     await rm(directory, { recursive: true, force: true });

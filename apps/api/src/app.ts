@@ -5,7 +5,6 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import {
-  catalog,
   createRoomSchema,
   joinRoomSchema,
   updatePreferencesSchema,
@@ -13,12 +12,14 @@ import {
   roundSchema,
   voteSchema,
   readySchema,
+  type Game,
   type RoomMember,
   type RoomSnapshot,
   type RoomStatus,
 } from '@partypick/contracts';
 import { matchGames } from '@partypick/matching';
 import { openDatabase, type Database, type Queryable } from './db.js';
+import { readCatalog, seedCatalog } from './catalog.js';
 
 const COOKIE = 'partypick_session';
 const DAY = 24 * 60 * 60 * 1000;
@@ -39,6 +40,7 @@ interface Room {
   members: InternalMember[];
   winnerGameId: string | null;
   inviteToken: string;
+  catalog: Game[];
 }
 class ApiError extends Error {
   constructor(
@@ -113,7 +115,7 @@ export function buildApp(options: AppOptions = {}) {
       return reply.code(400).send({
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'Проверьте заполненные поля и полный список игр.',
+          message: 'Проверьте заполненные поля и выбранные игры.',
         },
       });
     const nativeError = error as { statusCode?: number };
@@ -156,6 +158,7 @@ export function buildApp(options: AppOptions = {}) {
       dataDir,
       options.databaseUrl ?? process.env.DATABASE_URL,
     );
+    await seedCatalog(database);
     await database.query('DELETE FROM guest_sessions WHERE expires_at < $1', [
       now(),
     ]);
@@ -259,10 +262,11 @@ export function buildApp(options: AppOptions = {}) {
         ready: entry.ready,
       })),
       winnerGameId: room.winnerGameId,
+      catalog: room.catalog,
       ...(member.id === room.hostMemberId
         ? { invitePath: '/join/' + room.inviteToken }
         : {}),
-      matching: matchGames(room.members),
+      matching: matchGames(room.members, room.catalog),
     };
   };
   const resetRound = (room: Room) => {
@@ -322,7 +326,7 @@ export function buildApp(options: AppOptions = {}) {
       status: 'ok',
       service: 'partypick-api',
     }));
-    routes.get('/api/catalog', async () => catalog);
+    routes.get('/api/catalog', async () => readCatalog(getDb()));
     routes.post(
       '/api/rooms',
       { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } },
@@ -341,6 +345,7 @@ export function buildApp(options: AppOptions = {}) {
           hostMemberId: memberId,
           winnerGameId: null,
           inviteToken: randomBytes(32).toString('hex'),
+          catalog: await readCatalog(getDb()),
           members: [
             {
               id: memberId,
@@ -436,6 +441,17 @@ export function buildApp(options: AppOptions = {}) {
           request,
           input.version,
           (room, member) => {
+            const knownGames = new Set(room.catalog.map((game) => game.id));
+            if (
+              input.preferences.games.some(
+                (game) => !knownGames.has(game.gameId),
+              )
+            )
+              throw new ApiError(
+                400,
+                'VALIDATION_ERROR',
+                'Выберите игры из каталога этой комнаты.',
+              );
             if (room.status !== 'collecting') resetRound(room);
             member.preferences = input.preferences;
           },
@@ -467,7 +483,7 @@ export function buildApp(options: AppOptions = {}) {
                 'NOT_READY',
                 'Нужно минимум два участника и ответы каждого.',
               );
-            if (!matchGames(room.members).eligible.length)
+            if (!matchGames(room.members, room.catalog).eligible.length)
               throw new ApiError(
                 409,
                 'NO_MATCHES',
@@ -500,7 +516,7 @@ export function buildApp(options: AppOptions = {}) {
                 'Голосование сейчас закрыто.',
               );
             if (
-              !matchGames(room.members).eligible.some(
+              !matchGames(room.members, room.catalog).eligible.some(
                 (game) => game.gameId === input.gameId,
               )
             )
@@ -547,7 +563,7 @@ export function buildApp(options: AppOptions = {}) {
                 );
             }
             // Match order breaks equal vote counts by weakest preference, total score, ID.
-            const candidates = matchGames(room.members).eligible;
+            const candidates = matchGames(room.members, room.catalog).eligible;
             candidates.sort(
               (a, b) =>
                 (counts.get(b.gameId) ?? 0) - (counts.get(a.gameId) ?? 0),
