@@ -1,7 +1,29 @@
 import { z } from 'zod';
 
-export type GameMode = 'coop' | 'competitive';
+export type GameMode = 'coop' | 'competitive' | 'pvpve';
+export const gameGenres = [
+  'shooter',
+  'moba',
+  'survival',
+  'party',
+  'sandbox',
+  'racing',
+  'sports',
+] as const;
+export type GameGenre = (typeof gameGenres)[number];
 export type Taste = 'want' | 'okay' | 'veto';
+export interface GameProfile {
+  id: string;
+  name: string;
+  mode: GameMode;
+  minParty: number;
+  maxParty: number;
+  allowedPartySizes?: number[];
+  teamSize?: number;
+  estimatedMinutes: number;
+  intensity: 'relaxed' | 'focused';
+  allowsRandoms: boolean;
+}
 export interface Game {
   id: string;
   name: string;
@@ -11,77 +33,15 @@ export interface Game {
   suggestedMinutes: number;
   description: string;
   sourceUrl: string;
+  genres: GameGenre[];
+  freeToPlay: boolean;
+  profiles: GameProfile[];
 }
-
-// Durations are editorial session estimates, never guarantees or full campaign lengths.
-export const catalog: Game[] = [
-  {
-    id: 'deep-rock',
-    name: 'Deep Rock Galactic',
-    minPlayers: 1,
-    maxPlayers: 4,
-    modes: ['coop'],
-    suggestedMinutes: 30,
-    description: 'Совместная вылазка космических дворфов.',
-    sourceUrl: 'https://store.steampowered.com/app/548430/',
-  },
-  {
-    id: 'valheim',
-    name: 'Valheim',
-    minPlayers: 1,
-    maxPlayers: 10,
-    modes: ['coop'],
-    suggestedMinutes: 60,
-    description: 'Исследование и строительство в мире викингов.',
-    sourceUrl: 'https://store.steampowered.com/app/892970/',
-  },
-  {
-    id: 'overcooked-2',
-    name: 'Overcooked! 2',
-    minPlayers: 2,
-    maxPlayers: 4,
-    modes: ['coop', 'competitive'],
-    suggestedMinutes: 20,
-    description: 'Хаос на кухне: совместные и соревновательные режимы.',
-    sourceUrl: 'https://store.steampowered.com/app/728880/',
-  },
-  {
-    id: 'pummel-party',
-    name: 'Pummel Party',
-    minPlayers: 2,
-    maxPlayers: 8,
-    modes: ['competitive'],
-    suggestedMinutes: 60,
-    description:
-      'Настольная вечеринка и мини-игры. Для небольшой компании можно добавить ботов.',
-    sourceUrl: 'https://store.steampowered.com/app/880940/',
-  },
-  {
-    id: 'dont-starve',
-    name: "Don't Starve Together",
-    minPlayers: 2,
-    maxPlayers: 6,
-    modes: ['coop'],
-    suggestedMinutes: 45,
-    description:
-      'Совместное выживание. В каталоге выбран профиль мира на 6 игроков; настройки выделенных серверов не учитываются.',
-    sourceUrl: 'https://store.steampowered.com/app/322330/',
-  },
-  {
-    id: 'unrailed',
-    name: 'Unrailed!',
-    minPlayers: 2,
-    maxPlayers: 4,
-    modes: ['coop', 'competitive'],
-    suggestedMinutes: 20,
-    description: 'Стройте железную дорогу, пока поезд движется.',
-    sourceUrl: 'https://store.steampowered.com/app/1016920/',
-  },
-];
+export { catalog } from './catalog.js';
 
 export const gameChoiceSchema = z
   .strictObject({
-    gameId: z.enum(catalog.map((game) => game.id) as [string, ...string[]]),
+    gameId: z.string().min(1).max(64),
     owned: z.boolean(),
     installed: z.boolean(),
     taste: z.enum(['want', 'okay', 'veto']),
@@ -94,13 +54,21 @@ export const gameChoiceSchema = z
 export const preferencesSchema = z
   .strictObject({
     availableMinutes: z.number().int().min(15).max(240),
-    mode: z.enum(['any', 'coop', 'competitive']),
-    games: z.array(gameChoiceSchema).length(catalog.length),
+    mode: z.enum(['any', 'coop', 'competitive', 'pvpve']),
+    allowRandoms: z.boolean().optional(),
+    sessionStyle: z.enum(['any', 'relaxed', 'focused']).optional(),
+    genres: z
+      .array(z.enum(gameGenres))
+      .max(gameGenres.length)
+      .refine((values) => new Set(values).size === values.length)
+      .optional(),
+    games: z.array(gameChoiceSchema).max(200),
   })
   .refine(
     (value) =>
-      new Set(value.games.map((game) => game.gameId)).size === catalog.length,
-    'Укажите каждую игру каталога ровно один раз',
+      new Set(value.games.map((game) => game.gameId)).size ===
+      value.games.length,
+    'Не повторяйте игры в списке',
   );
 export type Preferences = z.infer<typeof preferencesSchema>;
 export type GameChoice = z.infer<typeof gameChoiceSchema>;
@@ -125,7 +93,13 @@ export type ReasonCode =
   | 'not_installed'
   | 'veto'
   | 'mode'
-  | 'time';
+  | 'time'
+  | 'randoms_required'
+  | 'random_fill'
+  | 'pvp_risk'
+  | 'genre_fit'
+  | 'session_fit'
+  | 'preference_fit';
 export interface MatchReason {
   code: ReasonCode;
   memberIds: string[];
@@ -135,6 +109,17 @@ export interface GameMatch {
   gameId: string;
   score: number;
   weakestScore: number;
+  profileId: string;
+  profileName: string;
+  estimatedMinutes: number;
+  randomSlots: number;
+  scoreBreakdown: {
+    preferences: number;
+    genreFit: number;
+    sessionFit: number;
+    partyFit: number;
+  };
+  warnings: MatchReason[];
   reasons: MatchReason[];
 }
 export interface ExcludedGame {
@@ -148,6 +133,7 @@ export interface MatchingResult {
   excluded: ExcludedGame[];
 }
 export interface RoomSnapshot {
+  catalog: Game[];
   id: string;
   title: string;
   maxMembers: number;
