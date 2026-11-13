@@ -47,6 +47,15 @@ export interface Game {
   profiles: GameProfile[];
 }
 export { catalog, normalizeCatalogSearch, validateCatalog } from './catalog.js';
+export {
+  availabilitySchema,
+  libraryChangeSchema,
+  patchLibrarySchema,
+  applyLibrarySchema,
+  applyAvailability,
+  applyLibraryToPreferences,
+} from './library.js';
+export type { Availability, KnownAvailability, LibraryEntry, LibrarySnapshot } from './library.js';
 
 export const gameChoiceSchema = z
   .strictObject({

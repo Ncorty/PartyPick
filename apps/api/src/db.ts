@@ -72,6 +72,12 @@ export async function openDatabase(
     token_hash TEXT PRIMARY KEY,
     expires_at BIGINT NOT NULL
   )`);
+    await database.query(`CREATE TABLE IF NOT EXISTS guest_libraries (
+    session_hash TEXT PRIMARY KEY REFERENCES guest_sessions(token_hash) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    entries JSONB NOT NULL,
+    updated_at BIGINT NOT NULL
+  )`);
     await database.query(`CREATE TABLE IF NOT EXISTS rooms (
     id TEXT PRIMARY KEY,
     invite_hash TEXT NOT NULL UNIQUE,
