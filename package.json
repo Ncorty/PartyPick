@@ -17,6 +17,7 @@
     "test": "npm run build:shared && vitest run",
     "lint": "eslint . --max-warnings 0",
     "test:e2e": "npm run build:shared && npm run build -w @partypick/api && playwright test",
+    "catalog:validate": "npm run build -w @partypick/contracts && node packages/contracts/scripts/validate-catalog.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

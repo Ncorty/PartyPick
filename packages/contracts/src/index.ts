@@ -3,12 +3,17 @@ import { z } from 'zod';
 export type GameMode = 'coop' | 'competitive' | 'pvpve';
 export const gameGenres = [
   'shooter',
+  'action',
   'moba',
   'survival',
   'party',
   'sandbox',
   'racing',
   'sports',
+  'horror',
+  'strategy',
+  'puzzle',
+  'board',
 ] as const;
 export type GameGenre = (typeof gameGenres)[number];
 export type Taste = 'want' | 'okay' | 'veto';
@@ -21,6 +26,8 @@ export interface GameProfile {
   allowedPartySizes?: number[];
   teamSize?: number;
   estimatedMinutes: number;
+  playMinutes?: number;
+  setupMinutes?: number;
   intensity: 'relaxed' | 'focused';
   allowsRandoms: boolean;
 }
@@ -33,11 +40,13 @@ export interface Game {
   suggestedMinutes: number;
   description: string;
   sourceUrl: string;
+  aliases?: string[];
+  verifiedAt?: string;
   genres: GameGenre[];
   freeToPlay: boolean;
   profiles: GameProfile[];
 }
-export { catalog } from './catalog.js';
+export { catalog, normalizeCatalogSearch, validateCatalog } from './catalog.js';
 
 export const gameChoiceSchema = z
   .strictObject({
