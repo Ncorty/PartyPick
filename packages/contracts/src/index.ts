@@ -55,7 +55,12 @@ export {
   applyAvailability,
   applyLibraryToPreferences,
 } from './library.js';
-export type { Availability, KnownAvailability, LibraryEntry, LibrarySnapshot } from './library.js';
+export type {
+  Availability,
+  KnownAvailability,
+  LibraryEntry,
+  LibrarySnapshot,
+} from './library.js';
 
 export const gameChoiceSchema = z
   .strictObject({

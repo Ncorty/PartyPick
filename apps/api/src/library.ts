@@ -198,7 +198,18 @@ export function registerLibraryRoutes(
           roomIds.has(entry.gameId),
         );
         const next = applyLibraryToPreferences(member.preferences, applicable);
-        if (JSON.stringify(next) === JSON.stringify(member.preferences))
+        const oldGames = new Map(
+          member.preferences.games.map((game) => [game.gameId, game]),
+        );
+        if (
+          !next.games.some((game) => {
+            const old = oldGames.get(game.gameId);
+            return (
+              game.owned !== (old?.owned ?? false) ||
+              game.installed !== (old?.installed ?? false)
+            );
+          })
+        )
           return deps.snapshot(room, session);
         member.preferences = next;
         deps.resetRound(room);

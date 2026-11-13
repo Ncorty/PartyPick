@@ -19,8 +19,14 @@ class Client {
     const response = await this.app.inject({
       method,
       url,
-      headers: { origin, ...(this.cookie ? { cookie: this.cookie } : {}) },
-      ...(payload === undefined ? {} : { payload }),
+      headers: {
+        origin,
+        ...(payload === undefined
+          ? {}
+          : { 'content-type': 'application/json' }),
+        ...(this.cookie ? { cookie: this.cookie } : {}),
+      },
+      ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
     });
     const cookie = response.headers['set-cookie'];
     const raw = Array.isArray(cookie) ? cookie[0] : cookie;
@@ -147,6 +153,124 @@ describe('guest library', () => {
       ).statusCode,
     ).toBe(403);
     now -= 8 * 24 * 60 * 60 * 1000;
+  });
+
+  it('does not reset an active round when availability is already identical', async () => {
+    const host = new Client(app),
+      guest = new Client(app);
+    const room = await host.room('Комната без сброса');
+    await guest.send(
+      'POST',
+      `/api/invites/${room.invitePath!.split('/').pop()}/join`,
+      { displayName: 'Друг' },
+    );
+    const game = room.catalog[0]!.id;
+    const prefs: Preferences = {
+      availableMinutes: 120,
+      mode: 'any',
+      games: [{ taste: 'okay', installed: true, owned: true, gameId: game }],
+    };
+    const current = (
+      await host.send('GET', `/api/rooms/${room.id}`)
+    ).json<RoomSnapshot>();
+    const first = (
+      await host.send('PUT', `/api/rooms/${room.id}/preferences`, {
+        version: current.version,
+        preferences: prefs,
+      })
+    ).json<RoomSnapshot>();
+    const second = (
+      await guest.send('PUT', `/api/rooms/${room.id}/preferences`, {
+        version: first.version,
+        preferences: prefs,
+      })
+    ).json<RoomSnapshot>();
+    const active = (
+      await host.send('POST', `/api/rooms/${room.id}/voting`, {
+        version: second.version,
+      })
+    ).json<RoomSnapshot>();
+    const vote = (
+      await guest.send('PUT', `/api/rooms/${room.id}/vote`, {
+        version: active.version,
+        round: active.round,
+        gameId: game,
+      })
+    ).json<RoomSnapshot>();
+    const library = (
+      await host.send('PATCH', '/api/me/library', {
+        version: 0,
+        changes: [
+          { gameId: game, availability: 'installed' },
+          { gameId: room.catalog[1]!.id, availability: 'unavailable' },
+        ],
+      })
+    ).json<LibrarySnapshot>();
+    const result = (
+      await host.send('POST', `/api/rooms/${room.id}/apply-library`, {
+        version: vote.version,
+        libraryVersion: library.version,
+        resetRound: true,
+      })
+    ).json<RoomSnapshot>();
+    expect(result.status).toBe('voting');
+    expect(result.version).toBe(vote.version);
+    expect(result.round).toBe(vote.round);
+    expect(
+      result.members.find((member) => member.voteGameId === game),
+    ).toBeTruthy();
+    const hostVote = (
+      await host.send('PUT', `/api/rooms/${room.id}/vote`, {
+        version: result.version,
+        round: result.round,
+        gameId: game,
+      })
+    ).json<RoomSnapshot>();
+    const confirmed = (
+      await host.send('POST', `/api/rooms/${room.id}/finalize`, {
+        version: hostVote.version,
+        round: hostVote.round,
+      })
+    ).json<RoomSnapshot>();
+    expect(confirmed.status).toBe('confirmed');
+    const changedLibrary = (
+      await host.send('PATCH', '/api/me/library', {
+        version: library.version,
+        changes: [{ gameId: game, availability: 'unavailable' }],
+      })
+    ).json<LibrarySnapshot>();
+    expect(
+      (
+        await host.send('POST', `/api/rooms/${room.id}/apply-library`, {
+          version: confirmed.version,
+          libraryVersion: library.version,
+          resetRound: true,
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(
+      (
+        await host.send('POST', `/api/rooms/${room.id}/apply-library`, {
+          version: hostVote.version,
+          libraryVersion: changedLibrary.version,
+          resetRound: true,
+        })
+      ).statusCode,
+    ).toBe(409);
+    const reopened = (
+      await host.send('POST', `/api/rooms/${room.id}/apply-library`, {
+        version: confirmed.version,
+        libraryVersion: changedLibrary.version,
+        resetRound: true,
+      })
+    ).json<RoomSnapshot>();
+    expect(reopened.status).toBe('collecting');
+    expect(reopened.winnerGameId).toBeNull();
+    expect(
+      reopened.members.every(
+        (member) => member.voteGameId === null && !member.ready,
+      ),
+    ).toBe(true);
   });
 
   it('leaves room answers untouched on library save and applies known entries only with host reset', async () => {

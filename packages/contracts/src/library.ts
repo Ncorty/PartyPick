@@ -48,10 +48,13 @@ export function applyAvailability(
   for (const entry of entries) {
     const previous = byId.get(entry.gameId);
     if (!previous && entry.availability === 'unavailable') continue;
+    const owned = entry.availability !== 'unavailable';
+    const installed = entry.availability === 'installed';
+    if (previous?.owned === owned && previous.installed === installed) continue;
     byId.set(entry.gameId, {
       gameId: entry.gameId,
-      owned: entry.availability !== 'unavailable',
-      installed: entry.availability === 'installed',
+      owned,
+      installed,
       taste: previous?.taste ?? 'okay',
     });
   }
