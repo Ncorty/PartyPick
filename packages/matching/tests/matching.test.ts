@@ -181,7 +181,10 @@ describe('session-aware recommendations', () => {
     const game = structuredClone(only('valorant')[0]!);
     game.profiles = [{ ...game.profiles[0]!, allowedPartySizes: [1, 2, 3, 5] }];
     expect(matchGames(group(4), [game]).excluded[0]!.reasons).toContainEqual(
-      expect.objectContaining({ code: 'player_count' }),
+      expect.objectContaining({
+        code: 'player_count',
+        params: expect.objectContaining({ allowedSizes: '1, 2, 3, 5' }),
+      }),
     );
   });
   it('distinguishes PvPvE from safe cooperative play and warns about other players', () => {

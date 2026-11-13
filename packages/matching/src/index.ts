@@ -27,6 +27,9 @@ function profileProblems(profile: GameProfile, members: readonly RoomMember[]) {
         min: profile.minParty,
         max: profile.maxParty,
         profile: profile.name,
+        ...(profile.allowedPartySizes
+          ? { allowedSizes: profile.allowedPartySizes.join(', ') }
+          : {}),
       }),
     );
   const modes = members.filter(

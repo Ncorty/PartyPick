@@ -43,6 +43,61 @@ describe('database-backed catalog', () => {
     }
   });
 
+  it('upgrades a version-two row without changing an active room snapshot or its votes', async () => {
+    const database = await openDatabase('memory://');
+    try {
+      const original = { ...catalog[0]!, name: 'Старый seed' };
+      const state = {
+        id: 'existing',
+        status: 'voting',
+        round: 7,
+        version: 12,
+        winnerGameId: null,
+        catalog: [original],
+        members: [
+          {
+            id: 'guest',
+            voteGameId: original.id,
+            ready: false,
+            preferences: {
+              availableMinutes: 30,
+              mode: 'any',
+              games: [
+                {
+                  gameId: original.id,
+                  owned: true,
+                  installed: true,
+                  taste: 'want',
+                },
+              ],
+            },
+          },
+        ],
+      };
+      await database.query(
+        'INSERT INTO game_catalog (id, data, seed_version) VALUES ($1, $2::jsonb, 2)',
+        [original.id, JSON.stringify(original)],
+      );
+      await database.query(
+        'INSERT INTO rooms (id, invite_hash, state) VALUES ($1, $2, $3::jsonb)',
+        [state.id, 'invite-hash', JSON.stringify(state)],
+      );
+      await seedCatalog(database);
+      await seedCatalog(database);
+      const persisted = await database.query<{ state: typeof state }>(
+        'SELECT state FROM rooms WHERE id = $1',
+        [state.id],
+      );
+      expect(persisted.rows[0]?.state).toEqual(state);
+      expect(
+        (await readCatalog(database)).find((game) => game.id === original.id),
+      ).toEqual(catalog[0]);
+      expect(await readCatalog(database)).toHaveLength(catalog.length);
+    } finally {
+      await database.close();
+    }
+  });
+
   it('freezes legacy rooms to six games without rewriting modern room catalogs', async () => {
     const database = await openDatabase('memory://');
     try {

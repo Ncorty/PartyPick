@@ -1,7 +1,7 @@
-import { catalog, type Game } from '@partypick/contracts';
+import { catalog, validateCatalog, type Game } from '@partypick/contracts';
 import type { Database, Queryable } from './db.js';
 
-export const CATALOG_SEED_VERSION = 2;
+export const CATALOG_SEED_VERSION = 3;
 const legacyIds = new Set([
   'deep-rock',
   'valheim',
@@ -30,17 +30,27 @@ export async function readCatalog(connection: Queryable): Promise<Game[]> {
 }
 
 export async function seedCatalog(database: Database): Promise<void> {
+  const errors = validateCatalog(catalog);
+  if (errors.length)
+    throw new Error(`Invalid shipped catalog:\n${errors.join('\n')}`);
   await database.transaction(async (connection) => {
-    for (const game of catalog) {
-      await connection.query(
-        `INSERT INTO game_catalog (id, data, seed_version)
-         VALUES ($1, $2::jsonb, $3)
-         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data,
-           seed_version = EXCLUDED.seed_version
-         WHERE game_catalog.seed_version < EXCLUDED.seed_version`,
-        [game.id, JSON.stringify(game), CATALOG_SEED_VERSION],
-      );
-    }
+    const params = catalog.flatMap((game) => [
+      game.id,
+      JSON.stringify(game),
+      CATALOG_SEED_VERSION,
+    ]);
+    const rows = catalog.map((_, index) => {
+      const start = index * 3;
+      return `($${start + 1}, $${start + 2}::jsonb, $${start + 3})`;
+    });
+    await connection.query(
+      `INSERT INTO game_catalog (id, data, seed_version)
+       VALUES ${rows.join(', ')}
+       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data,
+         seed_version = EXCLUDED.seed_version
+       WHERE game_catalog.seed_version < EXCLUDED.seed_version`,
+      params,
+    );
     // Legacy rooms keep their six-game scope, but active choices must restart:
     // updated profile constraints and scoring can invalidate previous votes.
     // This runs once, because adding catalog removes the migration predicate.
