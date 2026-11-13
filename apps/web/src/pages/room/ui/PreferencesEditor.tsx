@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { Game, GameGenre, Preferences, Taste } from '@partypick/contracts';
+import type {
+  Game,
+  GameGenre,
+  LibrarySnapshot,
+  Preferences,
+  Taste,
+} from '@partypick/contracts';
 import {
+  applyAvailability,
   normalizeCatalogSearch,
   preferencesSchema,
 } from '@partypick/contracts';
@@ -43,11 +50,15 @@ function defaults(catalog: Game[], initial: Preferences | null): Preferences {
 export function PreferencesEditor({
   catalog,
   initial,
+  library,
+  libraryAvailable,
   saving,
   onSave,
 }: {
   catalog: Game[];
   initial: Preferences | null;
+  library: LibrarySnapshot | null;
+  libraryAvailable: boolean;
   saving: boolean;
   onSave: (preferences: Preferences) => Promise<unknown>;
 }) {
@@ -59,6 +70,7 @@ export function PreferencesEditor({
   );
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
+  const prefilledRef = useRef(false);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
   const [genre, setGenre] = useState('all');
@@ -66,10 +78,43 @@ export function PreferencesEditor({
   useEffect(() => {
     if (!dirtyRef.current) {
       const next = defaults(catalog, initial);
-      setDraft(next);
       setSaved(next);
+      setDraft(next);
     }
   }, [initial, catalog]);
+  useEffect(() => {
+    if (initial || !library || prefilledRef.current || dirtyRef.current) return;
+    prefilledRef.current = true;
+    const ids = new Set(catalog.map((game) => game.id));
+    const entries = library.entries.filter((entry) => ids.has(entry.gameId));
+    const changed = entries.some(
+      (entry) =>
+        entry.availability === 'available' ||
+        entry.availability === 'installed',
+    );
+    dirtyRef.current = changed;
+    setDirty(changed);
+    setDraft((current) => ({
+      ...current,
+      games: applyAvailability(current.games, entries),
+    }));
+  }, [initial, catalog, library]);
+  function applySavedLibrary() {
+    if (!library) return;
+    const ids = new Set(catalog.map((game) => game.id));
+    setDraft((current) => ({
+      ...current,
+      games: applyAvailability(
+        current.games,
+        library.entries.filter((entry) => ids.has(entry.gameId)),
+      ),
+    }));
+    dirtyRef.current = true;
+    setDirty(true);
+    setMessage(
+      'Доступность подставлена в черновик. Сохраните пожелания, чтобы друзья увидели изменения.',
+    );
+  }
   function update(next: Preferences) {
     setDraft(next);
     setDirty(true);
@@ -248,6 +293,24 @@ export function PreferencesEditor({
       </fieldset>
       <div className="border-t-2 border-[#536477] pt-5">
         <h3 className="text-2xl text-[#f2d18c]">Ваши игры</h3>
+        <div className="mt-3 border-2 border-[#788594] bg-[#202b3b] p-3">
+          <p className="mb-2 text-lg leading-snug">
+            Подставим доступность из библиотеки; затем сохраните пожелания.
+            Запреты и условия вечера останутся в форме.
+          </p>
+          <Button
+            type="button"
+            disabled={saving || !libraryAvailable}
+            onClick={applySavedLibrary}
+          >
+            Подставить сохранённую библиотеку
+          </Button>
+          {!libraryAvailable && (
+            <p className="mt-2 text-lg text-[#bfc3cb]">
+              Библиотека пока недоступна. Заполните ответы вручную.
+            </p>
+          )}
+        </div>
         <p className="mt-2 text-lg leading-snug text-[#bfc3cb]">
           Доступно: {availableCount} из {catalog.length}. Изменено с последнего
           сохранения: {changedCount}. Бесплатную игру тоже нужно установить.

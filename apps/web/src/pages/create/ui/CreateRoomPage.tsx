@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { libraryKey } from '@entities/library';
 import { Link, useNavigate } from 'react-router-dom';
 import { createRoomSchema, type RoomSnapshot } from '@partypick/contracts';
 import { errorMessage, request } from '@shares/api';
@@ -7,11 +8,15 @@ import { AppShell, Button, Field, inputClass, Notice, Panel } from '@shares/ui';
 
 export function CreateRoomPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [validation, setValidation] = useState('');
   const mutation = useMutation({
     mutationFn: (body: unknown) =>
       request<RoomSnapshot>('/rooms', { method: 'POST', body }),
-    onSuccess: (room) => void navigate(`/rooms/${room.id}`),
+    onSuccess: (room) => {
+      queryClient.removeQueries({ queryKey: libraryKey });
+      void navigate(`/rooms/${room.id}`);
+    },
   });
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

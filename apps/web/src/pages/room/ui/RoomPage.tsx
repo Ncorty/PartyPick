@@ -6,6 +6,8 @@ import { ApiError, errorMessage, request } from '@shares/api';
 import { AppShell, Button, inputClass, Notice, Panel } from '@shares/ui';
 import partyArt from '@shares/assets/dungeon/party.webp';
 import { PreferencesEditor } from './PreferencesEditor';
+import { RoomLibraryActions } from '@features/room-library';
+import { getLibraryMonotonic, libraryKey } from '@entities/library';
 import { describeReason } from './match-reasons';
 
 type Command = { endpoint: string; method?: string; body: unknown };
@@ -39,6 +41,12 @@ export function RoomPage() {
     },
     refetchOnWindowFocus: true,
     retry: false,
+  });
+  const libraryQuery = useQuery({
+    queryKey: libraryKey,
+    queryFn: () => getLibraryMonotonic(queryClient),
+    enabled: !!roomQuery.data,
+    refetchOnWindowFocus: true,
   });
   const mutation = useMutation({
     mutationFn: async ({ endpoint, method = 'POST', body }: Command) => {
@@ -352,8 +360,19 @@ export function RoomPage() {
           {room.status === 'collecting' && (
             <Panel title="Ваши пожелания">
               <PreferencesEditor
+                key={`${room.id}:${room.viewerMemberId}`}
                 catalog={games}
                 initial={viewer.preferences}
+                library={
+                  libraryQuery.isFetchedAfterMount &&
+                  libraryQuery.data &&
+                  Date.parse(libraryQuery.data.sessionExpiresAt) > Date.now()
+                    ? libraryQuery.data
+                    : null
+                }
+                libraryAvailable={
+                  libraryQuery.isFetchedAfterMount && libraryQuery.isSuccess
+                }
                 saving={busy}
                 onSave={(preferences) =>
                   mutation.mutateAsync({
@@ -658,6 +677,10 @@ export function RoomPage() {
                 раунд.
               </p>
             ))}
+          <RoomLibraryActions
+            key={`${room.id}:${room.viewerMemberId}`}
+            room={room}
+          />
         </div>
       </div>
     </AppShell>

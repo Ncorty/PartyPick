@@ -3,6 +3,7 @@ import { CreateRoomPage } from '@pages/create';
 import { JoinRoomPage } from '@pages/join';
 import { RoomPage } from '@pages/room';
 import { NotFoundPage } from '@pages/not-found';
+import { LibraryPage } from '@pages/library';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './styles.css';
@@ -20,6 +21,7 @@ export function App() {
           <Route path="/create" element={<CreateRoomPage />} />
           <Route path="/join/:token" element={<JoinRoomPage />} />
           <Route path="/rooms/:id" element={<RoomPage />} />
+          <Route path="/library" element={<LibraryPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>

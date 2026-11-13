@@ -102,12 +102,17 @@ export function HomePage() {
           </span>
           PARTY PICK
         </a>
-        <a
-          className="underline py-2.5 text-[23px] max-[850px]:text-[21px] max-[540px]:max-w-[100px] max-[540px]:text-right max-[540px]:text-[17px] max-[540px]:leading-[1.2]"
-          href="#how"
+        <nav
+          className="flex flex-wrap justify-end gap-x-5 gap-y-1 text-[23px] max-[850px]:text-[21px] max-[540px]:max-w-[145px] max-[540px]:text-right max-[540px]:text-[17px] max-[540px]:leading-[1.2]"
+          aria-label="Основная навигация"
         >
-          Как это работает
-        </a>
+          <a className="py-1 underline" href="/library">
+            Библиотека
+          </a>
+          <a className="py-1 underline" href="#how">
+            Как это работает
+          </a>
+        </nav>
       </header>
       <main
         id="main"

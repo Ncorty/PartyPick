@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { libraryKey } from '@entities/library';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   joinRoomSchema,
@@ -12,6 +13,7 @@ import { AppShell, Button, Field, inputClass, Notice, Panel } from '@shares/ui';
 export function JoinRoomPage() {
   const { token = '' } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [validation, setValidation] = useState('');
   const invite = useQuery({
     queryKey: ['invite', token],
@@ -25,7 +27,10 @@ export function JoinRoomPage() {
         method: 'POST',
         body,
       }),
-    onSuccess: (room) => void navigate(`/rooms/${room.id}`),
+    onSuccess: (room) => {
+      queryClient.removeQueries({ queryKey: libraryKey });
+      void navigate(`/rooms/${room.id}`);
+    },
   });
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

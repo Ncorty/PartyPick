@@ -27,7 +27,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         К содержимому
       </a>
-      <header className="flex min-h-20 items-center justify-between gap-4 border-b-2 border-[#a68953] bg-[#101722ed] px-5 py-4 sm:px-10">
+      <header className="flex min-h-20 flex-wrap items-center justify-between gap-3 border-b-2 border-[#a68953] bg-[#101722ed] px-4 py-4 sm:px-10">
         <Link
           to="/"
           className="shrink-0 whitespace-nowrap font-['Not_A_Bug','Pixelify_Sans',sans-serif] text-[18px] tracking-wide no-underline sm:text-3xl"
@@ -35,12 +35,17 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           PARTY PICK
         </Link>
-        <Link
-          to="/create"
-          className="max-w-[110px] py-2 text-right text-lg leading-tight underline sm:max-w-none sm:text-xl"
+        <nav
+          className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-lg sm:text-xl"
+          aria-label="Основная навигация"
         >
-          Создать комнату
-        </Link>
+          <Link to="/library" className="py-2 underline">
+            Библиотека
+          </Link>
+          <Link to="/create" className="py-2 underline">
+            Создать комнату
+          </Link>
+        </nav>
       </header>
       <main id="main" className="mx-auto max-w-6xl px-4 py-8 sm:px-8 sm:py-12">
         {children}
