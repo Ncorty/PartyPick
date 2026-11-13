@@ -20,15 +20,17 @@ import {
 import { matchGames } from '@partypick/matching';
 import { openDatabase, type Database, type Queryable } from './db.js';
 import { readCatalog, seedCatalog } from './catalog.js';
+import { ApiError } from './errors.js';
+import { registerLibraryRoutes } from './library.js';
 
 const COOKIE = 'partypick_session';
 const DAY = 24 * 60 * 60 * 1000;
 const hash = (value: string) =>
   createHash('sha256').update(value).digest('hex');
-interface InternalMember extends RoomMember {
+export interface InternalMember extends RoomMember {
   sessionHash: string;
 }
-interface Room {
+export interface Room {
   id: string;
   title: string;
   maxMembers: number;
@@ -41,15 +43,6 @@ interface Room {
   winnerGameId: string | null;
   inviteToken: string;
   catalog: Game[];
-}
-class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-  }
 }
 export interface AppOptions {
   dataDir?: string;
@@ -322,6 +315,19 @@ export function buildApp(options: AppOptions = {}) {
   };
 
   app.register(async (routes) => {
+    registerLibraryRoutes(routes, {
+      getDb,
+      now,
+      sessionOrThrow,
+      ensureSession,
+      findRoom,
+      ensureActive,
+      memberOf,
+      requireHost,
+      snapshot,
+      resetRound,
+      persist,
+    });
     routes.get('/api/health', async () => ({
       status: 'ok',
       service: 'partypick-api',

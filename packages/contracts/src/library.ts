@@ -25,10 +25,14 @@ export const libraryChangeSchema = z.strictObject({
 });
 export const patchLibrarySchema = z.strictObject({
   version: z.number().int().nonnegative(),
-  changes: z.array(libraryChangeSchema).max(200).refine(
-    (changes) => new Set(changes.map((change) => change.gameId)).size === changes.length,
-    'Не повторяйте игры в списке',
-  ),
+  changes: z
+    .array(libraryChangeSchema)
+    .max(200)
+    .refine(
+      (changes) =>
+        new Set(changes.map((change) => change.gameId)).size === changes.length,
+      'Не повторяйте игры в списке',
+    ),
 });
 export const applyLibrarySchema = z.strictObject({
   version: z.number().int().positive(),
@@ -43,6 +47,7 @@ export function applyAvailability(
   const byId = new Map(games.map((game) => [game.gameId, game]));
   for (const entry of entries) {
     const previous = byId.get(entry.gameId);
+    if (!previous && entry.availability === 'unavailable') continue;
     byId.set(entry.gameId, {
       gameId: entry.gameId,
       owned: entry.availability !== 'unavailable',
@@ -57,5 +62,8 @@ export function applyLibraryToPreferences(
   preferences: Preferences,
   entries: LibraryEntry[],
 ): Preferences {
-  return { ...preferences, games: applyAvailability(preferences.games, entries) };
+  return {
+    ...preferences,
+    games: applyAvailability(preferences.games, entries),
+  };
 }
