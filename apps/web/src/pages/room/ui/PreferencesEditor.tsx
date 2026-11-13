@@ -1,18 +1,34 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { Game, Preferences, Taste } from '@partypick/contracts';
+import type { Game, GameGenre, Preferences, Taste } from '@partypick/contracts';
 import { preferencesSchema } from '@partypick/contracts';
 import { Button, Field, inputClass, Notice } from '@shares/ui';
 
-function defaults(games: Game[]): Preferences {
+const genreNames: Record<GameGenre, string> = {
+  shooter: 'Шутеры',
+  moba: 'MOBA',
+  survival: 'Выживание',
+  party: 'Для вечеринки',
+  sandbox: 'Песочницы',
+  racing: 'Гонки',
+  sports: 'Спорт',
+};
+
+function defaults(catalog: Game[], initial: Preferences | null): Preferences {
   return {
-    availableMinutes: 60,
-    mode: 'any',
-    games: games.map((game) => ({
-      gameId: game.id,
-      owned: false,
-      installed: false,
-      taste: 'okay',
-    })),
+    availableMinutes: initial?.availableMinutes ?? 60,
+    mode: initial?.mode ?? 'any',
+    allowRandoms: initial?.allowRandoms ?? true,
+    sessionStyle: initial?.sessionStyle ?? 'any',
+    genres: initial?.genres ?? [],
+    games: catalog.map(
+      (game) =>
+        initial?.games.find((choice) => choice.gameId === game.id) ?? {
+          gameId: game.id,
+          owned: false,
+          installed: false,
+          taste: 'okay',
+        },
+    ),
   };
 }
 
@@ -27,13 +43,16 @@ export function PreferencesEditor({
   saving: boolean;
   onSave: (preferences: Preferences) => Promise<unknown>;
 }) {
-  const [draft, setDraft] = useState<Preferences>(
-    () => initial ?? defaults(catalog),
+  const [draft, setDraft] = useState<Preferences>(() =>
+    defaults(catalog, initial),
   );
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
+  const [search, setSearch] = useState('');
+  const [genre, setGenre] = useState('all');
+  const [ownedOnly, setOwnedOnly] = useState(false);
   useEffect(() => {
-    if (!dirty) setDraft(initial ?? defaults(catalog));
+    if (!dirty) setDraft(defaults(catalog, initial));
   }, [initial, catalog, dirty]);
   function update(next: Preferences) {
     setDraft(next);
@@ -55,7 +74,9 @@ export function PreferencesEditor({
     event.preventDefault();
     const parsed = preferencesSchema.safeParse(draft);
     if (!parsed.success) {
-      setMessage('Проверьте время и ответы по каждой игре.');
+      setMessage(
+        'Проверьте время и ответы по играм. Изменения сохранены в форме.',
+      );
       return;
     }
     try {
@@ -63,9 +84,20 @@ export function PreferencesEditor({
       setDirty(false);
       setMessage('Пожелания сохранены. Друзья увидят ваши ответы.');
     } catch {
-      /* Server error is rendered by the room mutation. Preserve the draft. */
+      // Keep the draft; the room renders the server error.
     }
   }
+  const availableCount = draft.games.filter((choice) => choice.owned).length;
+  const visibleGames = catalog.filter((game) => {
+    const choice = draft.games.find((entry) => entry.gameId === game.id);
+    return (
+      game.name
+        .toLocaleLowerCase('ru')
+        .includes(search.trim().toLocaleLowerCase('ru')) &&
+      (genre === 'all' || game.genres.includes(genre as GameGenre)) &&
+      (!ownedOnly || choice?.owned)
+    );
+  });
   return (
     <form
       className="grid gap-5"
@@ -73,8 +105,9 @@ export function PreferencesEditor({
       aria-label="Ваши пожелания"
     >
       <p className="text-lg leading-snug text-[#bfc3cb]">
-        Сейчас подбираем игры, которые уже есть и установлены у каждого. Время
-        сессии в каталоге — ориентир, а не гарантия.
+        Отметьте доступные и установленные игры. Время, состав и «Сегодня не
+        хочу» — обязательные условия; жанры и настроение помогут расставить
+        подходящие варианты.
       </p>
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Сколько минут можете играть" htmlFor="available-minutes">
@@ -95,7 +128,7 @@ export function PreferencesEditor({
             }
           />
         </Field>
-        <Field label="Настроение на вечер" htmlFor="preferred-mode">
+        <Field label="Режим игры" htmlFor="preferred-mode">
           <select
             id="preferred-mode"
             className={inputClass}
@@ -109,90 +142,238 @@ export function PreferencesEditor({
             }
           >
             <option value="any">Любой режим</option>
-            <option value="coop">Кооператив</option>
+            <option value="coop">Кооператив без PvP</option>
             <option value="competitive">Соревнование</option>
+            <option value="pvpve">PvPvE: игроки и окружение</option>
+          </select>
+        </Field>
+        <Field label="Настроение на вечер" htmlFor="session-style">
+          <select
+            id="session-style"
+            className={inputClass}
+            disabled={saving}
+            value={draft.sessionStyle ?? 'any'}
+            onChange={(event) =>
+              update({
+                ...draft,
+                sessionStyle: event.target.value as NonNullable<
+                  Preferences['sessionStyle']
+                >,
+              })
+            }
+          >
+            <option value="any">Без предпочтений</option>
+            <option value="relaxed">Расслабиться</option>
+            <option value="focused">Сосредоточиться на игре</option>
           </select>
         </Field>
       </div>
-      <div className="grid gap-4">
-        {catalog.map((game) => {
-          const choice = draft.games.find((item) => item.gameId === game.id);
-          if (!choice) return null;
-          return (
-            <fieldset
-              key={game.id}
-              className="min-w-0 border-2 border-[#536477] bg-[#101722] px-3 pb-4"
+      <label className="flex min-h-11 cursor-pointer items-start gap-3 text-xl leading-snug">
+        <input
+          type="checkbox"
+          className="mt-1 size-5 shrink-0 accent-[#dfb768]"
+          checked={draft.allowRandoms ?? true}
+          disabled={saving}
+          onChange={(event) =>
+            update({ ...draft, allowRandoms: event.target.checked })
+          }
+        />
+        Можно добрать случайных игроков в нашу команду
+      </label>
+      <fieldset className="min-w-0">
+        <legend className="text-xl text-[#f2d18c]">
+          Какие жанры хочется сегодня
+        </legend>
+        <p className="mt-1 text-lg text-[#bfc3cb]">
+          Необязательно. Другие жанры останутся в подборе.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1">
+          {Object.entries(genreNames).map(([id, name]) => (
+            <label
+              key={id}
+              className="flex min-h-11 cursor-pointer items-center gap-2 text-lg"
             >
-              <legend className="max-w-full px-2 text-2xl leading-snug text-[#f2d18c]">
-                {game.name}
-              </legend>
-              <h3 className="sr-only">{game.name}</h3>
-              <p className="mt-1 text-lg leading-snug text-[#bfc3cb]">
-                {game.minPlayers}–{game.maxPlayers} игроков · около{' '}
-                {game.suggestedMinutes} мин.
-              </p>
-              <p className="mt-2 text-lg leading-snug text-[#bfc3cb]">
-                {game.description}
-              </p>
-              <div className="my-3 flex flex-wrap gap-x-6 gap-y-2">
-                <label className="flex min-h-11 cursor-pointer items-center gap-3 text-xl">
-                  <input
-                    type="checkbox"
-                    className="size-5 shrink-0 accent-[#dfb768]"
-                    checked={choice.owned}
-                    disabled={saving}
-                    onChange={(event) =>
-                      updateGame(game.id, {
-                        owned: event.target.checked,
-                        ...(!event.target.checked ? { installed: false } : {}),
-                      })
-                    }
-                  />
-                  Есть игра
-                </label>
-                <label
-                  className={`flex min-h-11 items-center gap-3 text-xl ${choice.owned ? 'cursor-pointer' : 'opacity-60'}`}
-                >
-                  <input
-                    type="checkbox"
-                    className="size-5 shrink-0 accent-[#dfb768]"
-                    checked={choice.installed}
-                    disabled={!choice.owned || saving}
-                    onChange={(event) =>
-                      updateGame(game.id, { installed: event.target.checked })
-                    }
-                  />
-                  Установлена
-                </label>
-              </div>
-              <label className="block text-lg">
-                Отношение к игре
-                <select
-                  className={`${inputClass} mt-2`}
-                  disabled={saving}
-                  value={choice.taste}
-                  onChange={(event) =>
-                    updateGame(game.id, { taste: event.target.value as Taste })
-                  }
-                >
-                  <option value="want">Хочу играть</option>
-                  <option value="okay">Не против</option>
-                  <option value="veto">Сегодня не хочу</option>
-                </select>
-              </label>
-            </fieldset>
-          );
-        })}
+              <input
+                type="checkbox"
+                className="size-5 shrink-0 accent-[#dfb768]"
+                disabled={saving}
+                checked={draft.genres?.includes(id as GameGenre) ?? false}
+                onChange={(event) =>
+                  update({
+                    ...draft,
+                    genres: event.target.checked
+                      ? [...(draft.genres ?? []), id as GameGenre]
+                      : (draft.genres ?? []).filter((item) => item !== id),
+                  })
+                }
+              />
+              {name}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <div className="border-t-2 border-[#536477] pt-5">
+        <h3 className="text-2xl text-[#f2d18c]">Ваши игры</h3>
+        <p className="mt-2 text-lg leading-snug text-[#bfc3cb]">
+          Доступно: {availableCount} из {catalog.length}. Бесплатную игру тоже
+          нужно установить. Каталог рассчитан на PC; доступ к режимам, ранги и
+          ограничения аккаунта проверяйте в игре.
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <Field label="Найти игру" htmlFor="game-search">
+            <input
+              id="game-search"
+              type="search"
+              className={inputClass}
+              value={search}
+              placeholder="Например, Counter-Strike"
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </Field>
+          <Field label="Жанр в каталоге" htmlFor="catalog-genre">
+            <select
+              id="catalog-genre"
+              className={inputClass}
+              value={genre}
+              onChange={(event) => setGenre(event.target.value)}
+            >
+              <option value="all">Все жанры</option>
+              {Object.entries(genreNames).map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-3 text-lg">
+          <input
+            type="checkbox"
+            className="size-5 shrink-0 accent-[#dfb768]"
+            checked={ownedOnly}
+            onChange={(event) => setOwnedOnly(event.target.checked)}
+          />
+          Только доступные мне
+        </label>
+        <p className="my-2 text-lg text-[#bfc3cb]" role="status">
+          Показано игр: {visibleGames.length} из {catalog.length}
+        </p>
+        <div
+          className="grid max-h-[36rem] gap-3 overflow-y-auto overscroll-contain pr-1"
+          aria-label="Каталог игр"
+        >
+          {visibleGames.map((game) => {
+            const choice = draft.games.find((item) => item.gameId === game.id);
+            if (!choice) return null;
+            return (
+              <fieldset
+                key={game.id}
+                className="min-w-0 border border-[#536477] bg-[#101722] px-3 pb-3"
+              >
+                <legend className="max-w-full break-words px-2 text-xl leading-snug text-[#f2d18c]">
+                  {game.name}
+                </legend>
+                <div className="flex flex-wrap gap-x-5 gap-y-1">
+                  <label className="flex min-h-11 cursor-pointer items-center gap-2 text-lg">
+                    <input
+                      type="checkbox"
+                      className="size-5 shrink-0 accent-[#dfb768]"
+                      checked={choice.owned}
+                      disabled={saving}
+                      onChange={(event) =>
+                        updateGame(game.id, {
+                          owned: event.target.checked,
+                          ...(!event.target.checked
+                            ? { installed: false }
+                            : {}),
+                        })
+                      }
+                    />
+                    Есть игра
+                  </label>
+                  <label
+                    className={`flex min-h-11 items-center gap-2 text-lg ${choice.owned ? 'cursor-pointer' : 'opacity-60'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-5 shrink-0 accent-[#dfb768]"
+                      checked={choice.installed}
+                      disabled={!choice.owned || saving}
+                      onChange={(event) =>
+                        updateGame(game.id, { installed: event.target.checked })
+                      }
+                    />
+                    Установлена
+                  </label>
+                  {game.freeToPlay && (
+                    <span className="self-center text-base text-[#a8dc83]">
+                      Бесплатная
+                    </span>
+                  )}
+                </div>
+                <details>
+                  <summary className="min-h-11 cursor-pointer py-2 text-lg underline">
+                    Пожелания и режимы: {game.name}
+                  </summary>
+                  <p className="mb-3 text-lg leading-snug text-[#bfc3cb]">
+                    {game.description}
+                  </p>
+                  <ul className="mb-4 grid gap-2 text-lg leading-snug text-[#bfc3cb]">
+                    {game.profiles.map((profile) => (
+                      <li key={profile.id}>
+                        {profile.name} · {profile.minParty}–{profile.maxParty} в
+                        компании · около {profile.estimatedMinutes} мин.
+                      </li>
+                    ))}
+                  </ul>
+                  <label className="block text-lg">
+                    Отношение к игре
+                    <select
+                      className={`${inputClass} mt-2`}
+                      disabled={saving}
+                      value={choice.taste}
+                      onChange={(event) =>
+                        updateGame(game.id, {
+                          taste: event.target.value as Taste,
+                        })
+                      }
+                    >
+                      <option value="want">Хочу играть</option>
+                      <option value="okay">Не против</option>
+                      <option value="veto">Сегодня не хочу</option>
+                    </select>
+                  </label>
+                </details>
+              </fieldset>
+            );
+          })}
+        </div>
+        {visibleGames.length === 0 && (
+          <Notice>
+            По этим фильтрам игр нет. Измените запрос или жанр — ваши ответы
+            сохранятся.
+          </Notice>
+        )}
       </div>
       {dirty && (
         <p className="text-lg text-[#dfb768]">
-          Есть несохранённые изменения. Обновление комнаты их не затронет.
+          Есть несохранённые изменения. Фильтры и обновление комнаты их не
+          затронут.
         </p>
       )}
       {message && <Notice>{message}</Notice>}
       <Button type="submit" disabled={saving}>
         {saving ? 'Сохраняем…' : 'Сохранить пожелания'}
       </Button>
+      {!dirty && initial && (
+        <a
+          href="#matching-results"
+          className="inline-flex min-h-11 items-center text-xl text-[#f2d18c] underline"
+          onClick={() => document.getElementById('matching-results')?.focus()}
+        >
+          Перейти к подбору
+        </a>
+      )}
     </form>
   );
 }

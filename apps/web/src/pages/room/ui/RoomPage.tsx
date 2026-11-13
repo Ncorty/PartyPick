@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Game, RoomSnapshot } from '@partypick/contracts';
+import type { RoomSnapshot } from '@partypick/contracts';
 import { ApiError, errorMessage, request } from '@shares/api';
 import { AppShell, Button, inputClass, Notice, Panel } from '@shares/ui';
 import partyArt from '@shares/assets/dungeon/party.webp';
@@ -38,12 +38,6 @@ export function RoomPage() {
       return error instanceof ApiError && error.status === 429 ? 30_000 : 1000;
     },
     refetchOnWindowFocus: true,
-    retry: false,
-  });
-  const catalogQuery = useQuery({
-    queryKey: ['catalog'],
-    queryFn: ({ signal }) => request<Game[]>('/catalog', { signal }),
-    staleTime: Infinity,
     retry: false,
   });
   const mutation = useMutation({
@@ -167,7 +161,7 @@ export function RoomPage() {
         </Notice>
       </AppShell>
     );
-  const games = catalogQuery.data ?? [];
+  const games = room.catalog;
   const gameById = (gameId: string | null) =>
     games.find((game) => game.id === gameId);
   const host = room.hostMemberId === viewer.id;
@@ -175,6 +169,9 @@ export function RoomPage() {
   const allVoted = room.members.every((member) => member.voteGameId !== null);
   const readyCount = room.members.filter((member) => member.ready).length;
   const winner = gameById(room.winnerGameId);
+  const winningMatch = room.matching.eligible.find(
+    (match) => match.gameId === room.winnerGameId,
+  );
   const inviteUrl = room.invitePath
     ? new URL(room.invitePath, window.location.origin).href
     : null;
@@ -340,7 +337,7 @@ export function RoomPage() {
                 Ход вечера
               </summary>
               <ol className="mt-5 grid gap-3 text-xl leading-snug">
-                <li>Сохраните время и пожелания по всем играм.</li>
+                <li>Отметьте доступные игры, время и пожелания.</li>
                 <li>Когда все ответят, ведущий откроет голосование.</li>
                 <li>Выберите игру и подтвердите готовность.</li>
               </ol>
@@ -354,200 +351,252 @@ export function RoomPage() {
         <div className="order-1 grid min-w-0 gap-7 lg:order-2">
           {room.status === 'collecting' && (
             <Panel title="Ваши пожелания">
-              {catalogQuery.isPending ? (
-                <Notice>Загружаем каталог…</Notice>
-              ) : catalogQuery.isError ? (
-                <>
-                  <Notice error>{errorMessage(catalogQuery.error)}</Notice>
-                  <Button
-                    type="button"
-                    onClick={() => void catalogQuery.refetch()}
-                  >
-                    Загрузить каталог ещё раз
-                  </Button>
-                </>
-              ) : (
-                <PreferencesEditor
-                  catalog={games}
-                  initial={viewer.preferences}
-                  saving={busy}
-                  onSave={(preferences) =>
-                    mutation.mutateAsync({
-                      endpoint: '/preferences',
-                      method: 'PUT',
-                      body: { version: room.version, preferences },
-                    })
-                  }
-                />
-              )}
+              <PreferencesEditor
+                catalog={games}
+                initial={viewer.preferences}
+                saving={busy}
+                onSave={(preferences) =>
+                  mutation.mutateAsync({
+                    endpoint: '/preferences',
+                    method: 'PUT',
+                    body: { version: room.version, preferences },
+                  })
+                }
+              />
             </Panel>
           )}
           {room.status !== 'confirmed' && (
-            <Panel
-              title={
-                room.status === 'voting'
-                  ? 'Голосование'
-                  : 'Что подходит компании'
-              }
-            >
-              {room.matching.status === 'pending' ? (
-                <Notice>
-                  Ждём пожелания:{' '}
-                  {room.matching.pendingMemberIds
-                    .map(
-                      (memberId) =>
-                        room.members.find((member) => member.id === memberId)
-                          ?.displayName ?? 'участник',
-                    )
-                    .join(', ')}
-                  .
-                </Notice>
-              ) : room.matching.eligible.length === 0 ? (
-                <Notice>
-                  Общих вариантов пока нет. Посмотрите причины ниже и обсудите,
-                  какие условия готовы изменить.
-                </Notice>
-              ) : (
-                <ul className="grid gap-4" aria-label="Подходящие игры">
-                  {room.matching.eligible.map((match) => {
-                    const game = gameById(match.gameId);
-                    return (
-                      <li
-                        key={match.gameId}
-                        className="min-w-0 border-2 border-[#a68953] bg-[#101722] p-4"
-                      >
-                        <h3 className="break-words text-2xl text-[#f2d18c]">
-                          {game?.name ?? match.gameId}
-                        </h3>
-                        <ul className="mt-3 grid gap-1 text-lg leading-snug text-[#bfc3cb]">
-                          {match.reasons.map((reason, index) => (
-                            <li key={`${reason.code}-${index}`}>
-                              {describeReason(reason, room.members)}
-                            </li>
-                          ))}
-                        </ul>
-                        {room.status === 'voting' && (
-                          <div className="mt-4">
-                            <Button
-                              type="button"
-                              className="w-full"
-                              disabled={busy}
-                              aria-pressed={viewer.voteGameId === match.gameId}
-                              onClick={() =>
-                                mutation.mutate({
-                                  endpoint: '/vote',
-                                  method: 'PUT',
-                                  body: { ...round, gameId: match.gameId },
-                                })
-                              }
-                            >
-                              {viewer.voteGameId === match.gameId
-                                ? `Ваш голос: ${game?.name ?? match.gameId}`
-                                : `Голосовать за ${game?.name ?? match.gameId}`}
-                            </Button>
-                            <p className="mt-2 text-lg text-[#bfc3cb]">
-                              Голосов:{' '}
-                              {
-                                room.members.filter(
-                                  (member) =>
-                                    member.voteGameId === match.gameId,
-                                ).length
-                              }
+            <div id="matching-results" tabIndex={-1} className="scroll-mt-4">
+              <Panel
+                title={
+                  room.status === 'voting'
+                    ? 'Голосование'
+                    : 'Что подходит компании'
+                }
+              >
+                {room.matching.status === 'pending' ? (
+                  <Notice>
+                    Ждём пожелания:{' '}
+                    {room.matching.pendingMemberIds
+                      .map(
+                        (memberId) =>
+                          room.members.find((member) => member.id === memberId)
+                            ?.displayName ?? 'участник',
+                      )
+                      .join(', ')}
+                    .
+                  </Notice>
+                ) : room.matching.eligible.length === 0 ? (
+                  <Notice>
+                    Общих вариантов пока нет. Посмотрите причины ниже и
+                    обсудите, какие условия готовы изменить.
+                  </Notice>
+                ) : (
+                  <ul className="grid gap-4" aria-label="Подходящие игры">
+                    {room.matching.eligible.map((match) => {
+                      const game = gameById(match.gameId);
+                      return (
+                        <li
+                          key={match.gameId}
+                          className="min-w-0 border-2 border-[#a68953] bg-[#101722] p-4"
+                        >
+                          <h3 className="break-words text-2xl text-[#f2d18c]">
+                            {game?.name ?? match.gameId}
+                          </h3>
+                          <p className="mt-2 text-xl leading-snug">
+                            {match.profileName} · около {match.estimatedMinutes}{' '}
+                            мин.
+                          </p>
+                          <p className="mt-2 text-lg text-[#a8dc83]">
+                            {match.randomSlots > 0
+                              ? `В команду доберутся случайные игроки: ${match.randomSlots}`
+                              : 'Ваша компания играет своим составом'}
+                          </p>
+                          <p className="mt-3 text-lg leading-snug text-[#bfc3cb]">
+                            Соответствие пожеланиям: {match.score} из 100.
+                            Сначала учитываем интерес наименее заинтересованного
+                            участника, затем общую оценку.
+                          </p>
+                          <details className="mt-2">
+                            <summary className="min-h-11 cursor-pointer py-2 text-lg underline">
+                              Из чего сложилась оценка
+                            </summary>
+                            <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-lg text-[#bfc3cb]">
+                              <dt>Желание играть</dt>
+                              <dd>{match.scoreBreakdown.preferences} / 70</dd>
+                              <dt>Выбранные жанры</dt>
+                              <dd>{match.scoreBreakdown.genreFit} / 10</dd>
+                              <dt>Настроение на вечер</dt>
+                              <dd>{match.scoreBreakdown.sessionFit} / 10</dd>
+                              <dt>Состав команды</dt>
+                              <dd>{match.scoreBreakdown.partyFit} / 10</dd>
+                            </dl>
+                            <p className="mt-3 text-lg text-[#bfc3cb]">
+                              Это объяснимая оценка условий, а не вероятность
+                              победы. Время — ориентир, матч может затянуться.
                             </p>
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {room.status === 'collecting' && host && (
-                <>
+                          </details>
+                          {match.warnings.length > 0 && (
+                            <ul className="mt-3 grid gap-2 text-lg leading-snug text-[#dfb768]">
+                              {match.warnings.map((reason, index) => (
+                                <li key={`${reason.code}-${index}`}>
+                                  {describeReason(reason, room.members)}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <ul className="mt-3 grid gap-1 text-lg leading-snug text-[#bfc3cb]">
+                            {match.reasons.map((reason, index) => (
+                              <li key={`${reason.code}-${index}`}>
+                                {describeReason(reason, room.members)}
+                              </li>
+                            ))}
+                          </ul>
+                          {room.status === 'voting' && (
+                            <div className="mt-4">
+                              <Button
+                                type="button"
+                                className="w-full"
+                                disabled={busy}
+                                aria-pressed={
+                                  viewer.voteGameId === match.gameId
+                                }
+                                onClick={() =>
+                                  mutation.mutate({
+                                    endpoint: '/vote',
+                                    method: 'PUT',
+                                    body: { ...round, gameId: match.gameId },
+                                  })
+                                }
+                              >
+                                {viewer.voteGameId === match.gameId
+                                  ? `Ваш голос: ${game?.name ?? match.gameId}`
+                                  : `Голосовать за ${game?.name ?? match.gameId}`}
+                              </Button>
+                              <p className="mt-2 text-lg text-[#bfc3cb]">
+                                Голосов:{' '}
+                                {
+                                  room.members.filter(
+                                    (member) =>
+                                      member.voteGameId === match.gameId,
+                                  ).length
+                                }
+                              </p>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {room.status === 'collecting' && host && (
+                  <>
+                    <Button
+                      type="button"
+                      className="mt-5 w-full"
+                      disabled={
+                        busy ||
+                        room.members.length < 2 ||
+                        room.matching.status !== 'ready'
+                      }
+                      onClick={() =>
+                        mutation.mutate({
+                          endpoint: '/voting',
+                          body: versioned,
+                        })
+                      }
+                    >
+                      Начать голосование
+                    </Button>
+                    <p className="mt-3 text-lg text-[#bfc3cb]">
+                      Нужно минимум двое участников, все ответы и хотя бы одна
+                      подходящая игра.
+                    </p>
+                  </>
+                )}
+                {room.status === 'collecting' &&
+                  !host &&
+                  room.matching.status === 'ready' && (
+                    <Notice>
+                      Подбор готов. Ведущий откроет голосование, когда компания
+                      соберётся.
+                    </Notice>
+                  )}
+                {room.status === 'voting' && host && (
                   <Button
                     type="button"
                     className="mt-5 w-full"
-                    disabled={
-                      busy ||
-                      room.members.length < 2 ||
-                      room.matching.status !== 'ready'
-                    }
+                    disabled={busy || !allVoted}
                     onClick={() =>
-                      mutation.mutate({ endpoint: '/voting', body: versioned })
+                      mutation.mutate({ endpoint: '/finalize', body: round })
                     }
                   >
-                    Начать голосование
+                    Завершить голосование
                   </Button>
-                  <p className="mt-3 text-lg text-[#bfc3cb]">
-                    Нужно минимум двое участников, все ответы и хотя бы одна
-                    подходящая игра.
-                  </p>
-                </>
-              )}
-              {room.status === 'collecting' &&
-                !host &&
-                room.matching.status === 'ready' && (
-                  <Notice>
-                    Подбор готов. Ведущий откроет голосование, когда компания
-                    соберётся.
-                  </Notice>
                 )}
-              {room.status === 'voting' && host && (
-                <Button
-                  type="button"
-                  className="mt-5 w-full"
-                  disabled={busy || !allVoted}
-                  onClick={() =>
-                    mutation.mutate({ endpoint: '/finalize', body: round })
-                  }
-                >
-                  Завершить голосование
-                </Button>
-              )}
-              {room.status === 'voting' && (
-                <p className="mt-4 text-lg text-[#bfc3cb]">
-                  Проголосовали{' '}
-                  {
-                    room.members.filter((member) => member.voteGameId !== null)
-                      .length
-                  }{' '}
-                  из {room.members.length}. Победит игра с наибольшим числом
-                  голосов; при равенстве — с более высоким местом в подборе.
-                </p>
-              )}
-              {room.matching.excluded.length > 0 && (
-                <details className="mt-6">
-                  <summary className="min-h-11 cursor-pointer py-2 text-xl underline">
-                    Почему другие игры не подошли (
-                    {room.matching.excluded.length})
-                  </summary>
-                  <ul className="mt-4 grid gap-4">
-                    {room.matching.excluded.map((excluded) => (
-                      <li
-                        key={excluded.gameId}
-                        className="border-t border-[#536477] pt-3"
-                      >
-                        <h3 className="text-xl text-[#dfb768]">
-                          {gameById(excluded.gameId)?.name ?? excluded.gameId}
-                        </h3>
-                        <ul className="mt-2 grid gap-1 text-lg leading-snug text-[#bfc3cb]">
-                          {excluded.reasons.map((reason, index) => (
-                            <li key={`${reason.code}-${index}`}>
-                              {describeReason(reason, room.members)}
-                            </li>
-                          ))}
-                        </ul>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </Panel>
+                {room.status === 'voting' && (
+                  <p className="mt-4 text-lg text-[#bfc3cb]">
+                    Проголосовали{' '}
+                    {
+                      room.members.filter(
+                        (member) => member.voteGameId !== null,
+                      ).length
+                    }{' '}
+                    из {room.members.length}. Победит игра с наибольшим числом
+                    голосов; при равенстве — с более высоким местом в подборе.
+                  </p>
+                )}
+                {room.matching.excluded.length > 0 && (
+                  <details className="mt-6">
+                    <summary className="min-h-11 cursor-pointer py-2 text-xl underline">
+                      Почему другие игры не подошли (
+                      {room.matching.excluded.length})
+                    </summary>
+                    <ul className="mt-4 grid gap-4">
+                      {room.matching.excluded.map((excluded) => (
+                        <li
+                          key={excluded.gameId}
+                          className="border-t border-[#536477] pt-3"
+                        >
+                          <h3 className="text-xl text-[#dfb768]">
+                            {gameById(excluded.gameId)?.name ?? excluded.gameId}
+                          </h3>
+                          <ul className="mt-2 grid gap-1 text-lg leading-snug text-[#bfc3cb]">
+                            {excluded.reasons.map((reason, index) => (
+                              <li key={`${reason.code}-${index}`}>
+                                {describeReason(reason, room.members)}
+                              </li>
+                            ))}
+                          </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </Panel>
+            </div>
           )}
           {room.status === 'confirmed' && (
             <Panel title="Игра выбрана">
               <h2 className="break-words text-3xl font-bold text-[#dfb768] sm:text-4xl">
                 {winner?.name ?? 'Выбранная игра'}
               </h2>
+              {winningMatch && (
+                <div className="mt-4 text-xl leading-snug">
+                  <p>
+                    {winningMatch.profileName} · около{' '}
+                    {winningMatch.estimatedMinutes} мин.
+                  </p>
+                  {winningMatch.warnings.map((reason, index) => (
+                    <p
+                      key={`${reason.code}-${index}`}
+                      className="mt-2 text-[#dfb768]"
+                    >
+                      {describeReason(reason, room.members)}
+                    </p>
+                  ))}
+                </div>
+              )}
               <p className="my-5 text-xl">
                 Готовы играть: {readyCount} из {room.members.length}.
               </p>

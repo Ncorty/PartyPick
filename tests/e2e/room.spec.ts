@@ -33,6 +33,9 @@ async function answer(page: Page, wanted: string) {
       .getByRole('checkbox', { name: 'Установлена', exact: true })
       .check();
     await game
+      .getByText(`Пожелания и режимы: ${name}`, { exact: true })
+      .click();
+    await game
       .getByLabel('Отношение к игре')
       .selectOption(name === wanted ? 'want' : 'okay');
   }
@@ -146,6 +149,131 @@ test('two guests create, join, choose, vote and confirm a real room', async ({
     await expect(guest.getByText('Ваш голос: Deep Rock Galactic')).toHaveCount(
       0,
     );
+  } finally {
+    await guestContext.close();
+  }
+});
+
+test('catalog search preserves hidden answers and a short Valorant session requires consent to random teammates', async ({
+  page,
+  browser,
+}) => {
+  const origin = 'http://127.0.0.1:5175';
+  const created = await page.request.post('/api/rooms', {
+    headers: { origin },
+    data: { displayName: 'Арсений', title: 'Короткий вечер', maxMembers: 2 },
+  });
+  expect(created.status()).toBe(201);
+  const room = await created.json();
+  const guestContext = await browser.newContext();
+  try {
+    const joined = await guestContext.request.post(
+      `${origin}/api/invites/${room.invitePath.split('/').pop()}/join`,
+      {
+        headers: { origin },
+        data: { displayName: 'Друг' },
+      },
+    );
+    expect(joined.status()).toBe(200);
+    const guestRoom = await joined.json();
+    const guestAnswer = await guestContext.request.put(
+      `${origin}/api/rooms/${room.id}/preferences`,
+      {
+        headers: { origin },
+        data: {
+          version: guestRoom.version,
+          preferences: {
+            availableMinutes: 25,
+            mode: 'competitive',
+            allowRandoms: true,
+            games: [
+              {
+                gameId: 'valorant',
+                owned: true,
+                installed: true,
+                taste: 'want',
+              },
+            ],
+          },
+        },
+      },
+    );
+    expect(guestAnswer.status()).toBe(200);
+    await page.goto(`/rooms/${room.id}`);
+    const form = page.getByRole('form', { name: 'Ваши пожелания' });
+    await form.getByLabel('Сколько минут можете играть').fill('25');
+    await form
+      .getByLabel('Режим игры', { exact: true })
+      .selectOption('competitive');
+    await form
+      .getByRole('checkbox', {
+        name: 'Можно добрать случайных игроков в нашу команду',
+      })
+      .uncheck();
+    await form.getByLabel('Найти игру').fill('Deep Rock');
+    await form
+      .getByRole('group', { name: 'Deep Rock Galactic', exact: true })
+      .getByRole('checkbox', { name: 'Есть игра', exact: true })
+      .check();
+    await form.getByLabel('Найти игру').fill('VALORANT');
+    const valorant = form.getByRole('group', { name: 'VALORANT', exact: true });
+    await valorant
+      .getByRole('checkbox', { name: 'Есть игра', exact: true })
+      .check();
+    await valorant
+      .getByRole('checkbox', { name: 'Установлена', exact: true })
+      .check();
+    await valorant
+      .getByText('Пожелания и режимы: VALORANT', { exact: true })
+      .click();
+    await valorant.getByLabel('Отношение к игре').selectOption('want');
+    await captureState(page, 'matching-preferences');
+    await form
+      .getByRole('button', { name: 'Сохранить пожелания', exact: true })
+      .click();
+    await expect(
+      page.getByText('Общих вариантов пока нет.', { exact: false }),
+    ).toBeVisible();
+    const storedResponse = await page.request.get(`/api/rooms/${room.id}`);
+    const stored = await storedResponse.json();
+    const host = stored.members.find(
+      (member: { id: string }) => member.id === stored.viewerMemberId,
+    );
+    expect(
+      host.preferences.games.find(
+        (game: { gameId: string }) => game.gameId === 'deep-rock',
+      ).owned,
+    ).toBe(true);
+    expect(
+      stored.matching.excluded.find(
+        (game: { gameId: string }) => game.gameId === 'valorant',
+      ).reasons,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'randoms_required' }),
+      ]),
+    );
+    await form
+      .getByRole('checkbox', {
+        name: 'Можно добрать случайных игроков в нашу команду',
+      })
+      .check();
+    await form
+      .getByRole('button', { name: 'Сохранить пожелания', exact: true })
+      .click();
+    const recommendations = page.getByRole('list', { name: 'Подходящие игры' });
+    await expect(
+      recommendations.getByRole('heading', { name: 'VALORANT', exact: true }),
+    ).toBeVisible();
+    await expect(recommendations).toContainText('Swiftplay');
+    await expect(recommendations).toContainText('около 20 мин.');
+    await expect(recommendations).toContainText('случайные игроки: 3');
+    await form.getByRole('link', { name: 'Перейти к подбору' }).click();
+    await expect(page.locator('#matching-results')).toBeFocused();
+    await expect(
+      recommendations.getByRole('heading', { name: 'VALORANT', exact: true }),
+    ).toBeInViewport();
+    await captureState(page, 'matching-result');
   } finally {
     await guestContext.close();
   }
