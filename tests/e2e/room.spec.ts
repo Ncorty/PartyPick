@@ -201,6 +201,7 @@ test('catalog search preserves hidden answers and a short Valorant session requi
     expect(guestAnswer.status()).toBe(200);
     await page.goto(`/rooms/${room.id}`);
     const form = page.getByRole('form', { name: 'Ваши пожелания' });
+    await captureState(page, 'catalog-unfiltered');
     await form.getByLabel('Сколько минут можете играть').fill('25');
     await form
       .getByLabel('Режим игры', { exact: true })
@@ -215,8 +216,9 @@ test('catalog search preserves hidden answers and a short Valorant session requi
       .getByRole('group', { name: 'Deep Rock Galactic', exact: true })
       .getByRole('checkbox', { name: 'Есть игра', exact: true })
       .check();
-    await form.getByLabel('Найти игру').fill('VALORANT');
+    await form.getByLabel('Найти игру').fill('  вАлОрАнТ  ');
     const valorant = form.getByRole('group', { name: 'VALORANT', exact: true });
+    await expect(valorant).toBeVisible();
     await valorant
       .getByRole('checkbox', { name: 'Есть игра', exact: true })
       .check();
@@ -227,6 +229,23 @@ test('catalog search preserves hidden answers and a short Valorant session requi
       .getByText('Пожелания и режимы: VALORANT', { exact: true })
       .click();
     await valorant.getByLabel('Отношение к игре').selectOption('want');
+    await form.getByLabel('Найти игру').fill('  КС  ');
+    await expect(
+      form.getByRole('group', { name: 'Counter-Strike 2', exact: true }),
+    ).toBeVisible();
+    await expect(valorant).toHaveCount(0);
+    await form.getByLabel('Найти игру').fill('ВАЛОРАНТ');
+    await expect(form.getByRole('status')).toContainText('Найдено: 1 из');
+    await captureState(page, 'catalog-alias-filtered');
+    await form.getByLabel('Найти игру').fill('нет такой игры');
+    await expect(
+      form.getByText('По этим фильтрам игр нет.', { exact: false }),
+    ).toBeVisible();
+    await form.getByRole('button', { name: 'Сбросить фильтры' }).click();
+    await form.getByLabel('Найти игру').fill('ВАЛОРАНТ');
+    await expect(
+      valorant.getByRole('checkbox', { name: 'Есть игра' }),
+    ).toBeChecked();
     await captureState(page, 'matching-preferences');
     await form
       .getByRole('button', { name: 'Сохранить пожелания', exact: true })
@@ -244,6 +263,7 @@ test('catalog search preserves hidden answers and a short Valorant session requi
         (game: { gameId: string }) => game.gameId === 'deep-rock',
       ).owned,
     ).toBe(true);
+    expect(host.preferences.games.length).toBeGreaterThanOrEqual(80);
     expect(
       stored.matching.excluded.find(
         (game: { gameId: string }) => game.gameId === 'valorant',

@@ -1,16 +1,24 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { Game, GameGenre, Preferences, Taste } from '@partypick/contracts';
-import { preferencesSchema } from '@partypick/contracts';
+import {
+  normalizeCatalogSearch,
+  preferencesSchema,
+} from '@partypick/contracts';
 import { Button, Field, inputClass, Notice } from '@shares/ui';
 
 const genreNames: Record<GameGenre, string> = {
   shooter: 'Шутеры',
+  action: 'Экшен',
   moba: 'MOBA',
   survival: 'Выживание',
   party: 'Для вечеринки',
   sandbox: 'Песочницы',
   racing: 'Гонки',
   sports: 'Спорт',
+  horror: 'Хоррор',
+  strategy: 'Стратегии',
+  puzzle: 'Головоломки',
+  board: 'Настольные',
 };
 
 function defaults(catalog: Game[], initial: Preferences | null): Preferences {
@@ -46,17 +54,26 @@ export function PreferencesEditor({
   const [draft, setDraft] = useState<Preferences>(() =>
     defaults(catalog, initial),
   );
+  const [saved, setSaved] = useState<Preferences>(() =>
+    defaults(catalog, initial),
+  );
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(false);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
   const [genre, setGenre] = useState('all');
   const [ownedOnly, setOwnedOnly] = useState(false);
   useEffect(() => {
-    if (!dirty) setDraft(defaults(catalog, initial));
-  }, [initial, catalog, dirty]);
+    if (!dirtyRef.current) {
+      const next = defaults(catalog, initial);
+      setDraft(next);
+      setSaved(next);
+    }
+  }, [initial, catalog]);
   function update(next: Preferences) {
     setDraft(next);
     setDirty(true);
+    dirtyRef.current = true;
     setMessage('');
   }
   function updateGame(
@@ -81,19 +98,36 @@ export function PreferencesEditor({
     }
     try {
       await onSave(parsed.data);
+      setSaved(parsed.data);
       setDirty(false);
+      dirtyRef.current = false;
       setMessage('Пожелания сохранены. Друзья увидят ваши ответы.');
     } catch {
       // Keep the draft; the room renders the server error.
     }
   }
   const availableCount = draft.games.filter((choice) => choice.owned).length;
-  const visibleGames = catalog.filter((game) => {
-    const choice = draft.games.find((entry) => entry.gameId === game.id);
+  const savedById = new Map(
+    saved.games.map((choice) => [choice.gameId, choice]),
+  );
+  const changedCount = draft.games.filter((choice) => {
+    const previous = savedById.get(choice.gameId);
     return (
-      game.name
-        .toLocaleLowerCase('ru')
-        .includes(search.trim().toLocaleLowerCase('ru')) &&
+      previous &&
+      (choice.owned !== previous.owned ||
+        choice.installed !== previous.installed ||
+        choice.taste !== previous.taste)
+    );
+  }).length;
+  const choices = new Map(draft.games.map((choice) => [choice.gameId, choice]));
+  const query = normalizeCatalogSearch(search);
+  const visibleGames = catalog.filter((game) => {
+    const choice = choices.get(game.id);
+    return (
+      (!query ||
+        [game.name, ...(game.aliases ?? [])].some((name) =>
+          normalizeCatalogSearch(name).includes(query),
+        )) &&
       (genre === 'all' || game.genres.includes(genre as GameGenre)) &&
       (!ownedOnly || choice?.owned)
     );
@@ -215,9 +249,10 @@ export function PreferencesEditor({
       <div className="border-t-2 border-[#536477] pt-5">
         <h3 className="text-2xl text-[#f2d18c]">Ваши игры</h3>
         <p className="mt-2 text-lg leading-snug text-[#bfc3cb]">
-          Доступно: {availableCount} из {catalog.length}. Бесплатную игру тоже
-          нужно установить. Каталог рассчитан на PC; доступ к режимам, ранги и
-          ограничения аккаунта проверяйте в игре.
+          Доступно: {availableCount} из {catalog.length}. Изменено с последнего
+          сохранения: {changedCount}. Бесплатную игру тоже нужно установить.
+          Каталог рассчитан на PC; доступ к режимам, ранги и ограничения
+          аккаунта проверяйте в игре.
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Field label="Найти игру" htmlFor="game-search">
@@ -226,7 +261,7 @@ export function PreferencesEditor({
               type="search"
               className={inputClass}
               value={search}
-              placeholder="Например, Counter-Strike"
+              placeholder="Например, кс или дота"
               onChange={(event) => setSearch(event.target.value)}
             />
           </Field>
@@ -256,14 +291,15 @@ export function PreferencesEditor({
           Только доступные мне
         </label>
         <p className="my-2 text-lg text-[#bfc3cb]" role="status">
-          Показано игр: {visibleGames.length} из {catalog.length}
+          Найдено: {visibleGames.length} из {catalog.length} · доступно:{' '}
+          {availableCount} · изменено: {changedCount}
         </p>
         <div
           className="grid max-h-[36rem] gap-3 overflow-y-auto overscroll-contain pr-1"
           aria-label="Каталог игр"
         >
           {visibleGames.map((game) => {
-            const choice = draft.games.find((item) => item.gameId === game.id);
+            const choice = choices.get(game.id);
             if (!choice) return null;
             return (
               <fieldset
@@ -321,8 +357,13 @@ export function PreferencesEditor({
                   <ul className="mb-4 grid gap-2 text-lg leading-snug text-[#bfc3cb]">
                     {game.profiles.map((profile) => (
                       <li key={profile.id}>
-                        {profile.name} · {profile.minParty}–{profile.maxParty} в
-                        компании · около {profile.estimatedMinutes} мин.
+                        {profile.name} ·{' '}
+                        {profile.allowedPartySizes?.join(', ') ??
+                          `${profile.minParty}–${profile.maxParty}`}{' '}
+                        в компании · ориентир {profile.estimatedMinutes} мин.
+                        {profile.playMinutes !== undefined &&
+                          profile.setupMinutes !== undefined &&
+                          ` (игра ${profile.playMinutes} + сбор ${profile.setupMinutes})`}
                       </li>
                     ))}
                   </ul>
@@ -350,8 +391,18 @@ export function PreferencesEditor({
         </div>
         {visibleGames.length === 0 && (
           <Notice>
-            По этим фильтрам игр нет. Измените запрос или жанр — ваши ответы
-            сохранятся.
+            По этим фильтрам игр нет. Ваши ответы остались в форме.{' '}
+            <button
+              type="button"
+              className="min-h-11 text-[#f2d18c] underline"
+              onClick={() => {
+                setSearch('');
+                setGenre('all');
+                setOwnedOnly(false);
+              }}
+            >
+              Сбросить фильтры
+            </button>
           </Notice>
         )}
       </div>
@@ -362,18 +413,20 @@ export function PreferencesEditor({
         </p>
       )}
       {message && <Notice>{message}</Notice>}
-      <Button type="submit" disabled={saving}>
-        {saving ? 'Сохраняем…' : 'Сохранить пожелания'}
-      </Button>
-      {!dirty && initial && (
-        <a
-          href="#matching-results"
-          className="inline-flex min-h-11 items-center text-xl text-[#f2d18c] underline"
-          onClick={() => document.getElementById('matching-results')?.focus()}
-        >
-          Перейти к подбору
-        </a>
-      )}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t-2 border-[#536477] bg-[#151e2a] py-3">
+        <Button type="submit" disabled={saving}>
+          {saving ? 'Сохраняем…' : 'Сохранить пожелания'}
+        </Button>
+        {!dirty && initial && (
+          <a
+            href="#matching-results"
+            className="inline-flex min-h-11 items-center text-xl text-[#f2d18c] underline"
+            onClick={() => document.getElementById('matching-results')?.focus()}
+          >
+            Перейти к подбору
+          </a>
+        )}
+      </div>
     </form>
   );
 }

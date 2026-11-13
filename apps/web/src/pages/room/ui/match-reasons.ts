@@ -25,7 +25,7 @@ export function describeReason(
     case 'no_veto':
       return 'Никто не исключил игру';
     case 'player_count':
-      return `Не подходит по числу игроков${profile}: нужно ${reason.params.min}–${reason.params.max} в компании`;
+      return `Не подходит по числу игроков${profile}: нужно ${reason.params.allowedSizes ?? `${reason.params.min}–${reason.params.max}`} в компании`;
     case 'missing_ownership':
       return `Нет игры: ${names}`;
     case 'not_installed':
