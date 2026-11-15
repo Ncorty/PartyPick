@@ -25,6 +25,93 @@ const member = (id: string): RoomMember => ({
   ready: false,
 });
 describe('matching rules', () => {
+  it('offers the complete Turbo profile, not a hybrid of Turbo and All Pick', () => {
+    const players = Array.from({ length: 5 }, (_, index) =>
+      member(`p${index}`),
+    );
+    players[0]!.preferences!.availableMinutes = 30;
+    const result = matchGames(
+      players,
+      catalog.filter((game) => game.id === 'dota2'),
+    );
+    expect(result.status).toBe('empty');
+    expect(
+      result.emptyDiagnostics?.groups.find((group) => group.code === 'time')
+        ?.gameIds,
+    ).toEqual(['dota2']);
+    expect(result.emptyDiagnostics?.plans).toEqual([
+      expect.objectContaining({
+        gameId: 'dota2',
+        profileId: 'turbo',
+        estimatedMinutes: 40,
+        changes: [
+          { field: 'availableMinutes', memberId: 'p0', from: 30, to: 40 },
+        ],
+      }),
+    ]);
+  });
+  it('lists every owner and every needed field without changing the input', () => {
+    const players = Array.from({ length: 5 }, (_, index) =>
+      member(`p${index}`),
+    );
+    for (const id of ['p1', 'p2']) {
+      const player = players.find((entry) => entry.id === id)!;
+      player.preferences!.games.find(
+        (game) => game.gameId === 'dota2',
+      )!.installed = false;
+    }
+    players[0]!.preferences!.availableMinutes = 30;
+    players[3]!.preferences!.mode = 'coop';
+    const before = JSON.stringify(players);
+    const games = catalog.filter((game) => game.id === 'dota2');
+    const result = matchGames(players, games);
+    expect(result.emptyDiagnostics?.plans[0]?.changes).toEqual([
+      { field: 'availableMinutes', memberId: 'p0', from: 30, to: 40 },
+      {
+        field: 'installed',
+        memberId: 'p1',
+        gameId: 'dota2',
+        from: false,
+        to: true,
+      },
+      {
+        field: 'installed',
+        memberId: 'p2',
+        gameId: 'dota2',
+        from: false,
+        to: true,
+      },
+      { field: 'mode', memberId: 'p3', from: 'coop', to: 'competitive' },
+    ]);
+    expect(JSON.stringify(players)).toBe(before);
+    expect(
+      matchGames([...players].reverse(), [...games].reverse()).emptyDiagnostics,
+    ).toEqual(result.emptyDiagnostics);
+  });
+  it('never offers purchase, veto removal, or a player-count workaround', () => {
+    const players = Array.from({ length: 5 }, (_, index) =>
+      member(`p${index}`),
+    );
+    players[0]!.preferences!.games.find(
+      (game) => game.gameId === 'dota2',
+    )!.owned = false;
+    players[1]!.preferences!.games.find(
+      (game) => game.gameId === 'dota2',
+    )!.taste = 'veto';
+    const result = matchGames(
+      players,
+      catalog.filter((game) => game.id === 'dota2'),
+    );
+    expect(result.emptyDiagnostics?.plans).toEqual([]);
+    expect(result.emptyDiagnostics?.groups.map((group) => group.code)).toEqual(
+      expect.arrayContaining(['missing_ownership', 'veto']),
+    );
+    const tooMany = matchGames(
+      Array.from({ length: 6 }, (_, index) => member(`p${index}`)),
+      catalog.filter((game) => game.id === 'dota2'),
+    );
+    expect(tooMany.emptyDiagnostics?.plans).toEqual([]);
+  });
   it('does not imply approval when a member has not answered', () => {
     const result = matchGames([
       member('host'),

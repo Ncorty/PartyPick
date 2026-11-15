@@ -5,6 +5,9 @@ import {
   type GameProfile,
   type MatchingResult,
   type MatchReason,
+  type RecoveryChange,
+  type RecoveryGroupCode,
+  type RecoveryPlan,
   type RoomMember,
 } from '@partypick/contracts';
 
@@ -70,6 +73,140 @@ function profileProblems(profile: GameProfile, members: readonly RoomMember[]) {
       ),
     );
   return { problems, randomSlots };
+}
+
+function accessProblems(
+  game: Game,
+  members: readonly RoomMember[],
+): MatchReason[] {
+  const missing: string[] = [];
+  const uninstalled: string[] = [];
+  const veto: string[] = [];
+  for (const member of members) {
+    const choice = member.preferences!.games.find(
+      (item) => item.gameId === game.id,
+    );
+    if (!choice?.owned) missing.push(member.id);
+    else if (!choice.installed) uninstalled.push(member.id);
+    if (choice?.taste === 'veto') veto.push(member.id);
+  }
+  return [
+    ...(missing.length ? [reason('missing_ownership', missing)] : []),
+    ...(uninstalled.length ? [reason('not_installed', uninstalled)] : []),
+    ...(veto.length ? [reason('veto', veto)] : []),
+  ];
+}
+
+function recoveryPlan(
+  game: Game,
+  profile: GameProfile,
+  members: readonly RoomMember[],
+  access: readonly MatchReason[],
+): RecoveryPlan | null {
+  if (
+    access.some(
+      (item) => item.code === 'missing_ownership' || item.code === 'veto',
+    )
+  )
+    return null;
+  if (
+    profileProblems(profile, members).problems.some(
+      (item) => item.code === 'player_count',
+    )
+  )
+    return null;
+  const changes: RecoveryChange[] = [];
+  const changed = members.map((member) => {
+    const preferences = member.preferences!;
+    const choice = preferences.games.find((item) => item.gameId === game.id)!;
+    const next = {
+      ...preferences,
+      games: preferences.games.map((item) => ({ ...item })),
+    };
+    if (!choice.installed) {
+      changes.push({
+        field: 'installed',
+        memberId: member.id,
+        gameId: game.id,
+        from: false,
+        to: true,
+      });
+      next.games.find((item) => item.gameId === game.id)!.installed = true;
+    }
+    if (preferences.availableMinutes < profile.estimatedMinutes) {
+      changes.push({
+        field: 'availableMinutes',
+        memberId: member.id,
+        from: preferences.availableMinutes,
+        to: profile.estimatedMinutes,
+      });
+      next.availableMinutes = profile.estimatedMinutes;
+    }
+    if (preferences.mode !== 'any' && preferences.mode !== profile.mode) {
+      changes.push({
+        field: 'mode',
+        memberId: member.id,
+        from: preferences.mode,
+        to: profile.mode,
+      });
+      next.mode = profile.mode;
+    }
+    const slots = profile.allowsRandoms
+      ? Math.max(0, (profile.teamSize ?? members.length) - members.length)
+      : 0;
+    if (slots && preferences.allowRandoms === false) {
+      changes.push({
+        field: 'allowRandoms',
+        memberId: member.id,
+        from: false,
+        to: true,
+      });
+      next.allowRandoms = true;
+    }
+    return { ...member, preferences: next };
+  });
+  if (!changes.length || accessProblems(game, changed).length) return null;
+  const evaluated = profileProblems(profile, changed);
+  if (evaluated.problems.length) return null;
+  changes.sort(
+    (a, b) =>
+      a.memberId.localeCompare(b.memberId, 'en') ||
+      a.field.localeCompare(b.field, 'en'),
+  );
+  return {
+    gameId: game.id,
+    profileId: profile.id,
+    profileName: profile.name,
+    estimatedMinutes: profile.estimatedMinutes,
+    randomSlots: evaluated.randomSlots,
+    mode: profile.mode,
+    changes,
+    warnings: [
+      ...(evaluated.randomSlots
+        ? [reason('random_fill', [], { slots: evaluated.randomSlots })]
+        : []),
+      ...(profile.mode === 'pvpve' ? [reason('pvp_risk')] : []),
+    ],
+  };
+}
+
+function comparePlans(a: RecoveryPlan, b: RecoveryPlan): number {
+  const people = (plan: RecoveryPlan) =>
+    new Set(plan.changes.map((change) => change.memberId)).size;
+  const addedTime = (plan: RecoveryPlan) =>
+    plan.changes.reduce(
+      (sum, change) =>
+        sum +
+        (change.field === 'availableMinutes' ? change.to - change.from : 0),
+      0,
+    );
+  return (
+    people(a) - people(b) ||
+    a.changes.length - b.changes.length ||
+    addedTime(a) - addedTime(b) ||
+    a.gameId.localeCompare(b.gameId, 'en') ||
+    a.profileId.localeCompare(b.profileId, 'en')
+  );
 }
 
 function rankProfile(
@@ -160,30 +297,47 @@ export function matchGames(
     eligible: [],
     excluded: [],
   };
+  const groupGames = new Map<RecoveryGroupCode, Set<string>>();
+  const groupMembers = new Map<RecoveryGroupCode, Set<string>>();
+  const candidates: RecoveryPlan[] = [];
+  const groupFor = (code: MatchReason['code']): RecoveryGroupCode | null => {
+    if (code === 'player_count' || code === 'randoms_required') return 'party';
+    if (
+      code === 'missing_ownership' ||
+      code === 'not_installed' ||
+      code === 'veto' ||
+      code === 'time' ||
+      code === 'mode'
+    )
+      return code;
+    return null;
+  };
   for (const game of [...games].sort((a, b) =>
     a.id.localeCompare(b.id, 'en'),
   )) {
-    const access: MatchReason[] = [];
-    const missing: string[] = [],
-      uninstalled: string[] = [],
-      veto: string[] = [];
-    for (const member of members) {
-      const choice = member.preferences!.games.find(
-        (item) => item.gameId === game.id,
-      );
-      if (!choice?.owned) missing.push(member.id);
-      else if (!choice.installed) uninstalled.push(member.id);
-      if (choice?.taste === 'veto') veto.push(member.id);
-    }
-    if (missing.length) access.push(reason('missing_ownership', missing));
-    if (uninstalled.length) access.push(reason('not_installed', uninstalled));
-    if (veto.length) access.push(reason('veto', veto));
+    const access = accessProblems(game, members);
     const profiles = game.profiles.map((profile) => ({
       profile,
       ...profileProblems(profile, members),
     }));
     const valid = profiles.filter((entry) => !entry.problems.length);
     if (access.length || !valid.length) {
+      for (const item of [
+        ...access,
+        ...(!valid.length ? profiles.flatMap((entry) => entry.problems) : []),
+      ]) {
+        const group = groupFor(item.code);
+        if (!group) continue;
+        if (!groupGames.has(group)) groupGames.set(group, new Set());
+        if (!groupMembers.has(group)) groupMembers.set(group, new Set());
+        groupGames.get(group)!.add(game.id);
+        for (const id of item.memberIds) groupMembers.get(group)!.add(id);
+      }
+      const plans = profiles
+        .map(({ profile }) => recoveryPlan(game, profile, members, access))
+        .filter((plan): plan is RecoveryPlan => !!plan)
+        .sort(comparePlans);
+      if (plans[0]) candidates.push(plans[0]);
       // Explain the closest single profile, never combine incompatible modes
       // or the duration of one mode with the party size of another.
       const closest = [...profiles].sort(
@@ -218,6 +372,27 @@ export function matchGames(
       b.score - a.score ||
       a.gameId.localeCompare(b.gameId, 'en'),
   );
-  if (!result.eligible.length) result.status = 'empty';
+  if (!result.eligible.length) {
+    result.status = 'empty';
+    result.emptyDiagnostics = {
+      groups: (
+        [
+          'missing_ownership',
+          'not_installed',
+          'veto',
+          'time',
+          'mode',
+          'party',
+        ] as const
+      )
+        .filter((code) => groupGames.has(code))
+        .map((code) => ({
+          code,
+          gameIds: [...groupGames.get(code)!].sort(),
+          memberIds: [...groupMembers.get(code)!].sort(),
+        })),
+      plans: candidates.sort(comparePlans).slice(0, 3),
+    };
+  }
   return result;
 }

@@ -149,14 +149,49 @@ export interface ExcludedGame {
   gameId: string;
   reasons: MatchReason[];
 }
+export type RecoveryGroupCode =
+  'missing_ownership' | 'not_installed' | 'veto' | 'time' | 'mode' | 'party';
+export interface RecoveryGroup {
+  code: RecoveryGroupCode;
+  gameIds: string[];
+  memberIds: string[];
+}
+export type RecoveryChange =
+  | { field: 'availableMinutes'; memberId: string; from: number; to: number }
+  | { field: 'mode'; memberId: string; from: Preferences['mode']; to: GameMode }
+  | { field: 'allowRandoms'; memberId: string; from: false; to: true }
+  | {
+      field: 'installed';
+      memberId: string;
+      gameId: string;
+      from: false;
+      to: true;
+    };
+export interface RecoveryPlan {
+  gameId: string;
+  profileId: string;
+  profileName: string;
+  estimatedMinutes: number;
+  randomSlots: number;
+  mode: GameMode;
+  changes: RecoveryChange[];
+  warnings: MatchReason[];
+}
+export interface EmptyDiagnostics {
+  groups: RecoveryGroup[];
+  plans: RecoveryPlan[];
+}
 export interface MatchingResult {
   status: 'pending' | 'ready' | 'empty';
   pendingMemberIds: string[];
   eligible: GameMatch[];
   excluded: ExcludedGame[];
+  emptyDiagnostics?: EmptyDiagnostics;
 }
 export interface RoomSnapshot {
   catalog: Game[];
+  catalogRevision: string;
+  matchingRulesVersion: 1;
   id: string;
   title: string;
   maxMembers: number;
@@ -171,6 +206,32 @@ export interface RoomSnapshot {
   invitePath?: string;
   matching: MatchingResult;
 }
+export interface CatalogFieldChange {
+  field: string;
+  before: string;
+  after: string;
+}
+export interface CatalogProfileChange {
+  profileId: string;
+  name: string;
+  kind: 'added' | 'removed' | 'changed';
+  fields: CatalogFieldChange[];
+}
+export interface CatalogGameChange {
+  gameId: string;
+  name: string;
+  kind: 'added' | 'removed' | 'changed';
+  fields: CatalogFieldChange[];
+  profiles: CatalogProfileChange[];
+}
+export interface CatalogUpdatePreview {
+  roomVersion: number;
+  currentRevision: string;
+  targetRevision: string;
+  currentRulesVersion: number;
+  targetRulesVersion: 1;
+  changes: CatalogGameChange[];
+}
 export interface InviteInfo {
   title: string;
   memberCount: number;
@@ -182,6 +243,11 @@ export interface ApiErrorBody {
 }
 
 const versionSchema = z.number().int().positive();
+export const applyCatalogUpdateSchema = z.strictObject({
+  version: versionSchema,
+  targetRevision: z.string().regex(/^[a-f0-9]{64}$/),
+  confirmReset: z.literal(true),
+});
 export const createRoomSchema = z.strictObject({
   displayName: z.string().trim().min(2).max(24),
   title: z.string().trim().min(3).max(60),
