@@ -1,0 +1,85 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_APP_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/postgres-init.sh:/docker-entrypoint-initdb.d/10-partypick.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      private:
+        ipv4_address: 172.30.77.3
+
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3001
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN}
+      TRUSTED_PROXY: 172.30.77.2
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: partypick
+      DATABASE_USER: partypick
+      DATABASE_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      private:
+        ipv4_address: 172.30.77.4
+
+  proxy:
+    build:
+      context: .
+      target: proxy
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set SITE_ADDRESS}
+    ports:
+      - '${PUBLISH_IP:-0.0.0.0}:${HTTP_BIND:-80}:80'
+      - '${PUBLISH_IP:-0.0.0.0}:${HTTPS_BIND:-443}:443'
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      private:
+        ipv4_address: 172.30.77.2
+
+networks:
+  private:
+    ipam:
+      config:
+        - subnet: 172.30.77.0/29
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

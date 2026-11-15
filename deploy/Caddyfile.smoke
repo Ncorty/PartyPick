@@ -1,0 +1,38 @@
+{
+	log {
+		format filter {
+			request delete
+			uri delete
+			url delete
+			headers delete
+			resp_headers delete
+			err replace redacted
+			error replace redacted
+		}
+	}
+}
+
+localhost:443 {
+	tls internal
+	root * /srv/partypick
+	encode zstd gzip
+	@api path /api /api/*
+	handle @api {
+		reverse_proxy api:3001
+	}
+	@assets path /assets/* /favicon.svg
+	@hashed path_regexp ^/assets/.*-[A-Za-z0-9_-]{8,}\.[^/]+$
+	handle @assets {
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+	@file path_regexp \.[^/]+$
+	handle @file {
+		file_server
+	}
+	handle {
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

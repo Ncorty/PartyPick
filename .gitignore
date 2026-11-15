@@ -9,6 +9,7 @@ coverage/
 playwright-report/
 test-results/
 .data/
+backups/
 
 # Local agent instructions and working notes
 AGENTS.md

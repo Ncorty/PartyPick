@@ -1,4 +1,5 @@
 import Fastify, { LogController, type FastifyRequest } from 'fastify';
+import { isIP } from 'node:net';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -18,7 +19,12 @@ import {
   type RoomStatus,
 } from '@partypick/contracts';
 import { matchGames } from '@partypick/matching';
-import { openDatabase, type Database, type Queryable } from './db.js';
+import {
+  openDatabase,
+  type Database,
+  type PostgresConfig,
+  type Queryable,
+} from './db.js';
 import { catalogRevision, readCatalog, seedCatalog } from './catalog.js';
 import { ApiError } from './errors.js';
 import { registerLibraryRoutes } from './library.js';
@@ -51,27 +57,82 @@ export interface AppOptions {
   database?: Database;
   dataDir?: string;
   databaseUrl?: string;
+  postgresConfig?: PostgresConfig;
   publicOrigin?: string;
+  trustedProxy?: string;
   logger?: boolean;
   now?: () => number;
+}
+
+function postgresConfigFromEnv(): PostgresConfig | undefined {
+  const host = process.env.DATABASE_HOST;
+  if (!host) return undefined;
+  const port = Number(process.env.DATABASE_PORT ?? '5432');
+  const database = process.env.DATABASE_NAME;
+  const user = process.env.DATABASE_USER;
+  const password = process.env.DATABASE_PASSWORD;
+  if (
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535 ||
+    !database ||
+    !user ||
+    !password
+  )
+    throw new Error('PostgreSQL connection settings are incomplete');
+  return { host, port, database, user, password };
 }
 export function buildApp(options: AppOptions = {}) {
   const now = options.now ?? Date.now;
   const production = process.env.NODE_ENV === 'production';
   const publicOrigin = options.publicOrigin ?? process.env.PUBLIC_ORIGIN;
-  if (production && !publicOrigin)
-    throw new Error('PUBLIC_ORIGIN is required in production');
+  if (production) {
+    if (!publicOrigin)
+      throw new Error('PUBLIC_ORIGIN is required in production');
+    let parsed: URL;
+    try {
+      parsed = new URL(publicOrigin);
+    } catch {
+      throw new Error('PUBLIC_ORIGIN must be an exact HTTPS origin');
+    }
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.origin !== publicOrigin ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== '/' ||
+      parsed.search ||
+      parsed.hash
+    )
+      throw new Error('PUBLIC_ORIGIN must be an exact HTTPS origin');
+  }
+  const trustedProxy = options.trustedProxy ?? process.env.TRUSTED_PROXY;
+  if (production && (!trustedProxy || !isIP(trustedProxy)))
+    throw new Error('TRUSTED_PROXY must be one exact proxy IP in production');
   const origins = new Set(
     publicOrigin
       ? [new URL(publicOrigin).origin]
       : ['http://127.0.0.1:5173', 'http://localhost:5173'],
   );
-  const hostnames = new Set(
+  const allowedHosts = new Set(
+    [...origins].map((origin) => new URL(origin).host),
+  );
+  const allowedHostnames = new Set(
     [...origins].map((origin) => new URL(origin).hostname),
   );
+  const postgresConfig = options.postgresConfig ?? postgresConfigFromEnv();
+  if (
+    production &&
+    !options.database &&
+    !options.databaseUrl &&
+    !process.env.DATABASE_URL &&
+    !postgresConfig
+  )
+    throw new Error('PostgreSQL is required in production');
   const app = Fastify({
     logger: options.logger ?? true,
     logController: new LogController({ disableRequestLogging: true }),
+    trustProxy: trustedProxy ? (address) => address === trustedProxy : false,
     bodyLimit: 65536,
   });
   let database: Database | undefined;
@@ -86,14 +147,17 @@ export function buildApp(options: AppOptions = {}) {
     reply.header('Cache-Control', 'no-store');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       const origin = request.headers.origin;
-      const hostname = request.hostname.startsWith('[')
-        ? request.hostname
-        : request.hostname.split(':')[0];
+      const host = request.headers.host;
+      const hostname = host?.startsWith('[')
+        ? host.slice(0, host.indexOf(']') + 1)
+        : host?.split(':')[0];
       if (
         !origin ||
         !origins.has(origin) ||
-        !hostname ||
-        !hostnames.has(hostname)
+        !host ||
+        !(production
+          ? allowedHosts.has(host)
+          : allowedHostnames.has(hostname ?? ''))
       ) {
         throw new ApiError(
           403,
@@ -156,6 +220,7 @@ export function buildApp(options: AppOptions = {}) {
       (await openDatabase(
         dataDir,
         options.databaseUrl ?? process.env.DATABASE_URL,
+        postgresConfig,
       ));
     await seedCatalog(database);
     await database.query('DELETE FROM guest_sessions WHERE expires_at < $1', [
@@ -357,10 +422,10 @@ export function buildApp(options: AppOptions = {}) {
       resetRound,
       persist,
     });
-    routes.get('/api/health', async () => ({
-      status: 'ok',
-      service: 'partypick-api',
-    }));
+    routes.get('/api/health', async () => {
+      await getDb().query('SELECT 1');
+      return { status: 'ok', service: 'partypick-api' };
+    });
     routes.get('/api/catalog', async () => readCatalog(getDb()));
     routes.post(
       '/api/rooms',

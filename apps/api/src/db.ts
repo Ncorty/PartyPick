@@ -1,6 +1,14 @@
 import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 
+export interface PostgresConfig {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+}
+
 type Row = Record<string, unknown>;
 export interface Queryable {
   query<T extends Row = Row>(
@@ -16,10 +24,15 @@ export interface Database extends Queryable {
 export async function openDatabase(
   dataDir: string,
   databaseUrl?: string,
+  postgresConfig?: PostgresConfig,
 ): Promise<Database> {
   let database: Database;
-  if (databaseUrl) {
-    const pool = new pg.Pool({ connectionString: databaseUrl, max: 5 });
+  if (databaseUrl || postgresConfig) {
+    const pool = new pg.Pool({
+      ...(postgresConfig ?? { connectionString: databaseUrl }),
+      max: 5,
+      connectionTimeoutMillis: 5_000,
+    });
     database = {
       query: async <T extends Row>(text: string, values: unknown[] = []) => {
         const result = await pool.query<T>(text, values);

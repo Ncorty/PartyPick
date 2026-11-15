@@ -1,0 +1,48 @@
+name: Production containers
+on:
+  push:
+  pull_request:
+
+jobs:
+  production-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Create isolated Compose settings
+        run: |
+          umask 077
+          printf 'SITE_ADDRESS=localhost\nPUBLIC_ORIGIN=https://localhost:8443\nPUBLISH_IP=127.0.0.1\nHTTP_BIND=8080\nHTTPS_BIND=8443\n' > .env
+          printf 'POSTGRES_SUPERUSER_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> .env
+          printf "APP_DB_PASSWORD='%s'\n" "$(openssl rand -hex 20)@:?/#" >> .env
+      - name: Build production images
+        run: docker compose build
+      - name: Validate public and smoke proxy configurations
+        run: |
+          docker compose run --rm --no-deps proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker compose -f compose.yaml -f deploy/compose.smoke.yaml run --rm --no-deps proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Start production containers
+        run: docker compose -f compose.yaml -f deploy/compose.smoke.yaml up --no-build -d --wait
+      - name: Wait for internal HTTPS
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --insecure --fail --silent https://localhost:8443/api/health >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Exercise production route and recovery flows
+        run: npx playwright test --config playwright.production.config.ts
+      - name: Show safe diagnostics on failure
+        if: failure()
+        run: |
+          docker compose -f compose.yaml -f deploy/compose.smoke.yaml ps
+          docker compose -f compose.yaml -f deploy/compose.smoke.yaml logs --tail=100 api proxy
+      - name: Stop containers
+        if: always()
+        run: docker compose -f compose.yaml -f deploy/compose.smoke.yaml down --volumes
