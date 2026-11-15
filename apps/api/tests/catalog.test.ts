@@ -3,11 +3,39 @@ import { catalog } from '@partypick/contracts';
 import { openDatabase } from '../src/db.js';
 import {
   CATALOG_SEED_VERSION,
+  catalogRevision,
   readCatalog,
   seedCatalog,
 } from '../src/catalog.js';
 
 describe('database-backed catalog', () => {
+  it('hashes canonical content including metadata', () => {
+    const game = catalog.find((entry) => entry.profiles.length > 1)!;
+    const swapped = {
+      ...game,
+      genres: [...game.genres].reverse(),
+      modes: [...game.modes].reverse(),
+      aliases: [...(game.aliases ?? [])].reverse(),
+      profiles: [...game.profiles].reverse().map((profile) => ({
+        ...profile,
+        ...(profile.allowedPartySizes
+          ? { allowedPartySizes: [...profile.allowedPartySizes].reverse() }
+          : {}),
+      })),
+    };
+    expect(catalogRevision([game])).toBe(catalogRevision([swapped]));
+    expect(catalogRevision([game, catalog[0]!])).toBe(
+      catalogRevision([catalog[0]!, game]),
+    );
+    expect(
+      catalogRevision([
+        { ...game, description: `${game.description} Изменено.` },
+      ]),
+    ).not.toBe(catalogRevision([game]));
+    expect(catalogRevision([{ ...game, verifiedAt: '2026-11-14' }])).not.toBe(
+      catalogRevision([game]),
+    );
+  });
   it('seeds idempotently, updates older definitions and preserves current edits', async () => {
     const database = await openDatabase('memory://');
     try {

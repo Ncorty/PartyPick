@@ -1,7 +1,43 @@
 import { catalog, validateCatalog, type Game } from '@partypick/contracts';
+import { createHash } from 'node:crypto';
 import type { Database, Queryable } from './db.js';
 
 export const CATALOG_SEED_VERSION = 3;
+const setFields = new Set(['genres', 'modes', 'aliases', 'allowedPartySizes']);
+
+export function canonicalCatalogValue(value: unknown, key = ''): unknown {
+  const normalize = (item: unknown, field = ''): unknown => {
+    if (Array.isArray(item)) {
+      const values = item.map((entry) => normalize(entry));
+      if (field === 'games' || field === 'profiles')
+        return values.sort((a, b) =>
+          String((a as { id: string }).id).localeCompare(
+            String((b as { id: string }).id),
+            'en',
+          ),
+        );
+      if (setFields.has(field))
+        return values.sort((a, b) => String(a).localeCompare(String(b), 'en'));
+      return values;
+    }
+    if (item && typeof item === 'object')
+      return Object.fromEntries(
+        Object.entries(item)
+          .sort(([a], [b]) => a.localeCompare(b, 'en'))
+          .map(([name, entry]) => [name, normalize(entry, name)]),
+      );
+    return item;
+  };
+  return normalize(value, key);
+}
+
+export function canonicalCatalog(value: readonly Game[]): string {
+  return JSON.stringify(canonicalCatalogValue(value, 'games'));
+}
+
+export function catalogRevision(games: readonly Game[]): string {
+  return createHash('sha256').update(canonicalCatalog(games)).digest('hex');
+}
 const legacyIds = new Set([
   'deep-rock',
   'valheim',

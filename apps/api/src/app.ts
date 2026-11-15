@@ -19,9 +19,10 @@ import {
 } from '@partypick/contracts';
 import { matchGames } from '@partypick/matching';
 import { openDatabase, type Database, type Queryable } from './db.js';
-import { readCatalog, seedCatalog } from './catalog.js';
+import { catalogRevision, readCatalog, seedCatalog } from './catalog.js';
 import { ApiError } from './errors.js';
 import { registerLibraryRoutes } from './library.js';
+import { registerCatalogUpdateRoutes } from './catalog-update.js';
 
 const COOKIE = 'partypick_session';
 const DAY = 24 * 60 * 60 * 1000;
@@ -43,8 +44,11 @@ export interface Room {
   winnerGameId: string | null;
   inviteToken: string;
   catalog: Game[];
+  catalogRevision?: string;
+  matchingRulesVersion?: number;
 }
 export interface AppOptions {
+  database?: Database;
   dataDir?: string;
   databaseUrl?: string;
   publicOrigin?: string;
@@ -147,10 +151,12 @@ export function buildApp(options: AppOptions = {}) {
       options.dataDir ??
       process.env.PGLITE_DATA_DIR ??
       fileURLToPath(new URL('../.data', import.meta.url));
-    database = await openDatabase(
-      dataDir,
-      options.databaseUrl ?? process.env.DATABASE_URL,
-    );
+    database =
+      options.database ??
+      (await openDatabase(
+        dataDir,
+        options.databaseUrl ?? process.env.DATABASE_URL,
+      ));
     await seedCatalog(database);
     await database.query('DELETE FROM guest_sessions WHERE expires_at < $1', [
       now(),
@@ -161,7 +167,7 @@ export function buildApp(options: AppOptions = {}) {
     );
   });
   app.addHook('onClose', async () => {
-    await database?.close();
+    if (!options.database) await database?.close();
   });
 
   const currentSession = async (
@@ -237,6 +243,15 @@ export function buildApp(options: AppOptions = {}) {
   };
   const snapshot = (room: Room, session: string): RoomSnapshot => {
     const member = memberOf(room, session);
+    if (
+      room.matchingRulesVersion !== undefined &&
+      room.matchingRulesVersion !== 1
+    )
+      throw new ApiError(
+        409,
+        'UNSUPPORTED_RULES',
+        'Версия правил этой комнаты пока не поддерживается.',
+      );
     return {
       id: room.id,
       title: room.title,
@@ -256,6 +271,8 @@ export function buildApp(options: AppOptions = {}) {
       })),
       winnerGameId: room.winnerGameId,
       catalog: room.catalog,
+      catalogRevision: room.catalogRevision ?? catalogRevision(room.catalog),
+      matchingRulesVersion: 1,
       ...(member.id === room.hostMemberId
         ? { invitePath: '/join/' + room.inviteToken }
         : {}),
@@ -328,6 +345,18 @@ export function buildApp(options: AppOptions = {}) {
       resetRound,
       persist,
     });
+    registerCatalogUpdateRoutes(routes, {
+      getDb,
+      now,
+      sessionOrThrow,
+      findRoom,
+      ensureActive,
+      memberOf,
+      requireHost,
+      snapshot,
+      resetRound,
+      persist,
+    });
     routes.get('/api/health', async () => ({
       status: 'ok',
       service: 'partypick-api',
@@ -340,6 +369,7 @@ export function buildApp(options: AppOptions = {}) {
         const input = createRoomSchema.parse(request.body);
         const session = await ensureSession(request, reply);
         const memberId = randomUUID();
+        const roomCatalog = await readCatalog(getDb());
         const room: Room = {
           id: randomUUID(),
           title: input.title,
@@ -351,7 +381,9 @@ export function buildApp(options: AppOptions = {}) {
           hostMemberId: memberId,
           winnerGameId: null,
           inviteToken: randomBytes(32).toString('hex'),
-          catalog: await readCatalog(getDb()),
+          catalog: roomCatalog,
+          catalogRevision: catalogRevision(roomCatalog),
+          matchingRulesVersion: 1,
           members: [
             {
               id: memberId,
