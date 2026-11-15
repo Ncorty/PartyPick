@@ -49,6 +49,7 @@ function defaults(catalog: Game[], initial: Preferences | null): Preferences {
 
 export function PreferencesEditor({
   catalog,
+  catalogRevision,
   initial,
   library,
   libraryAvailable,
@@ -56,6 +57,7 @@ export function PreferencesEditor({
   onSave,
 }: {
   catalog: Game[];
+  catalogRevision: string;
   initial: Preferences | null;
   library: LibrarySnapshot | null;
   libraryAvailable: boolean;
@@ -71,17 +73,54 @@ export function PreferencesEditor({
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const prefilledRef = useRef(false);
+  const revisionRef = useRef(catalogRevision);
+  const catalogIdsRef = useRef(new Set(catalog.map((game) => game.id)));
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
   const [genre, setGenre] = useState('all');
   const [ownedOnly, setOwnedOnly] = useState(false);
   useEffect(() => {
+    if (revisionRef.current !== catalogRevision) {
+      const previousIds = catalogIdsRef.current;
+      const nextIds = new Set(catalog.map((game) => game.id));
+      const removed = [...previousIds].filter((id) => !nextIds.has(id));
+      const baseline = defaults(catalog, initial);
+      setSaved(baseline);
+      if (dirtyRef.current) {
+        const carry = (value: Preferences): Preferences => ({
+          ...value,
+          games: catalog.map(
+            (game) =>
+              value.games.find((choice) => choice.gameId === game.id) ?? {
+                gameId: game.id,
+                owned: false,
+                installed: false,
+                taste: 'okay',
+              },
+          ),
+        });
+        setDraft((current) => carry(current));
+        setMessage(
+          removed.length
+            ? `Каталог комнаты обновился. Ваш черновик сохранён в форме. Удалённые игры, убранные из ответов: ${removed.length}. Новые игры пока не отмечены. Сохраните пожелания заново.`
+            : 'Каталог комнаты обновился. Ваш черновик сохранён в форме; новые игры пока не отмечены. Сохраните пожелания заново.',
+        );
+      } else {
+        setDraft(baseline);
+        setMessage(
+          'Каталог комнаты обновился. Ответы на общие игры сохранены, новые игры пока не отмечены.',
+        );
+      }
+      revisionRef.current = catalogRevision;
+      catalogIdsRef.current = nextIds;
+      return;
+    }
     if (!dirtyRef.current) {
       const next = defaults(catalog, initial);
       setSaved(next);
       setDraft(next);
     }
-  }, [initial, catalog]);
+  }, [initial, catalog, catalogRevision]);
   useEffect(() => {
     if (initial || !library || prefilledRef.current || dirtyRef.current) return;
     prefilledRef.current = true;
@@ -142,7 +181,9 @@ export function PreferencesEditor({
       return;
     }
     try {
+      const submittedRevision = revisionRef.current;
       await onSave(parsed.data);
+      if (revisionRef.current !== submittedRevision) return;
       setSaved(parsed.data);
       setDirty(false);
       dirtyRef.current = false;

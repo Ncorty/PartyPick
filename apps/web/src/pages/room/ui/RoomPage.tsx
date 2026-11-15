@@ -9,6 +9,8 @@ import { PreferencesEditor } from './PreferencesEditor';
 import { RoomLibraryActions } from '@features/room-library';
 import { getLibraryMonotonic, libraryKey } from '@entities/library';
 import { describeReason } from './match-reasons';
+import { EmptyRecovery } from './EmptyRecovery';
+import { CatalogUpdateControl } from './CatalogUpdateControl';
 
 type Command = { endpoint: string; method?: string; body: unknown };
 const phaseNames = {
@@ -358,31 +360,34 @@ export function RoomPage() {
         </div>
         <div className="order-1 grid min-w-0 gap-7 lg:order-2">
           {room.status === 'collecting' && (
-            <Panel title="Ваши пожелания">
-              <PreferencesEditor
-                key={`${room.id}:${room.viewerMemberId}`}
-                catalog={games}
-                initial={viewer.preferences}
-                library={
-                  libraryQuery.isFetchedAfterMount &&
-                  libraryQuery.data &&
-                  Date.parse(libraryQuery.data.sessionExpiresAt) > Date.now()
-                    ? libraryQuery.data
-                    : null
-                }
-                libraryAvailable={
-                  libraryQuery.isFetchedAfterMount && libraryQuery.isSuccess
-                }
-                saving={busy}
-                onSave={(preferences) =>
-                  mutation.mutateAsync({
-                    endpoint: '/preferences',
-                    method: 'PUT',
-                    body: { version: room.version, preferences },
-                  })
-                }
-              />
-            </Panel>
+            <div id="preferences-editor" className="scroll-mt-4">
+              <Panel title="Ваши пожелания">
+                <PreferencesEditor
+                  key={`${room.id}:${room.viewerMemberId}`}
+                  catalog={games}
+                  catalogRevision={room.catalogRevision}
+                  initial={viewer.preferences}
+                  library={
+                    libraryQuery.isFetchedAfterMount &&
+                    libraryQuery.data &&
+                    Date.parse(libraryQuery.data.sessionExpiresAt) > Date.now()
+                      ? libraryQuery.data
+                      : null
+                  }
+                  libraryAvailable={
+                    libraryQuery.isFetchedAfterMount && libraryQuery.isSuccess
+                  }
+                  saving={busy}
+                  onSave={(preferences) =>
+                    mutation.mutateAsync({
+                      endpoint: '/preferences',
+                      method: 'PUT',
+                      body: { version: room.version, preferences },
+                    })
+                  }
+                />
+              </Panel>
+            </div>
           )}
           {room.status !== 'confirmed' && (
             <div id="matching-results" tabIndex={-1} className="scroll-mt-4">
@@ -406,10 +411,7 @@ export function RoomPage() {
                     .
                   </Notice>
                 ) : room.matching.eligible.length === 0 ? (
-                  <Notice>
-                    Общих вариантов пока нет. Посмотрите причины ниже и
-                    обсудите, какие условия готовы изменить.
-                  </Notice>
+                  <EmptyRecovery room={room} />
                 ) : (
                   <ul className="grid gap-4" aria-label="Подходящие игры">
                     {room.matching.eligible.map((match) => {
@@ -678,9 +680,10 @@ export function RoomPage() {
               </p>
             ))}
           <RoomLibraryActions
-            key={`${room.id}:${room.viewerMemberId}`}
+            key={`${room.id}:${room.viewerMemberId}:${room.round}`}
             room={room}
           />
+          {host && <CatalogUpdateControl room={room} />}
         </div>
       </div>
     </AppShell>
