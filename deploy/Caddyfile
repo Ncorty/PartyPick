@@ -1,4 +1,7 @@
 {
+	servers {
+		strict_sni_host on
+	}
 	# Keep lifecycle errors while removing request details and credentials.
 	log {
 		format filter {

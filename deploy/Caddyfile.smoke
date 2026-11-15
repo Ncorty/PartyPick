@@ -1,4 +1,7 @@
 {
+	servers {
+		strict_sni_host on
+	}
 	log {
 		format filter {
 			request delete
