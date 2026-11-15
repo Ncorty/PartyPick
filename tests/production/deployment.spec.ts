@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { request as httpsRequest } from 'node:https';
 import { expect, test } from '@playwright/test';
 
 const origin = 'https://localhost:8443';
@@ -44,11 +45,30 @@ test('production proxy, PostgreSQL and recovery support two guests', async ({
     data: { displayName: 'X', title: 'X', maxMembers: 2 },
   });
   expect(wrongOrigin.status()).toBe(403);
-  const wrongHost = await page.request.post('/api/rooms', {
-    headers: { ...headers, host: 'attacker.invalid' },
-    data: { displayName: 'X', title: 'X', maxMembers: 2 },
+  const wrongHostStatus = await new Promise<number>((resolve, reject) => {
+    // Keep TLS SNI on localhost while sending a different HTTP Host.
+    const probe = httpsRequest(
+      `${origin}/api/rooms`,
+      {
+        method: 'POST',
+        servername: 'localhost',
+        rejectUnauthorized: false,
+        headers: {
+          host: 'attacker.invalid',
+          origin,
+          'content-type': 'application/json',
+        },
+      },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      },
+    );
+    probe.on('error', reject);
+    probe.end('{}');
   });
-  expect(wrongHost.status()).toBeGreaterThanOrEqual(400);
+  expect(wrongHostStatus).toBeGreaterThanOrEqual(400);
+  expect(wrongHostStatus).toBeLessThan(500);
 
   const catalog = await (await page.request.get('/api/catalog')).json();
   const game = catalog.find(
